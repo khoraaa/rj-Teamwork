@@ -1,0 +1,7 @@
+FROM node:22-alpine
+
+RUN apk add --no-cache python3 chromium
+RUN apk add --no-cache font-noto-cjk
+
+ENV CHROME_PATH=/usr/bin/chromium
+WORKDIR /app

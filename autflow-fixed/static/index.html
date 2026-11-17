@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AutoFlow · 多智能体 Workflow 编排平台</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <div class="logo">AF</div>
+    <div class="brand-text">
+      <strong>AutoFlow</strong>
+      <span>多智能体 Workflow 编排平台 · 原型</span>
+    </div>
+  </div>
+
+  <div class="runmeta">
+    <span class="status-chip" id="runStatus">未启动</span>
+    <span class="mono" id="runId">—</span>
+    <span class="dot-sep"></span>
+    <span class="mono" id="runClock">00:00</span>
+    <span class="ver" id="wfVer">—</span>
+  </div>
+
+  <div class="controls">
+    <button class="btn primary" id="btnStart">启动运行</button>
+    <button class="btn" id="btnPause" disabled>暂停</button>
+    <button class="btn" id="btnReset" disabled>重置</button>
+    <label class="switch" title="演示模式：首次格式错误 + 质量门判定不通过">
+      <input type="checkbox" id="tglDemo" checked>
+      <span>演示模式</span>
+    </label>
+    <select class="select" id="selSpeed" title="执行速度">
+      <option value="1">1×</option>
+      <option value="2">2×</option>
+      <option value="0.5">0.5×</option>
+      <option value="4">4×</option>
+    </select>
+    <label class="switch" title="故障注入：让 Coder 节点编译门持续失败，演示重试上限与转人工">
+      <input type="checkbox" id="tglFail">
+      <span>注入故障</span>
+    </label>
+    <button class="btn ghost" id="btnValidate" title="执行 DAG 环检测与依赖一致性校验">校验 DAG</button>
+  </div>
+</header>
+
+<div class="wfb">
+  <span class="wf-name" id="wfName">加载中…</span>
+  <span class="chip-soft" id="wfState">—</span>
+  <span class="chip-soft" id="wfTemplate" hidden>—</span>
+  <span class="dirty-dot" id="wfDirty" hidden>未保存</span>
+  <span class="req-label" id="reqLabel" title="当前草稿的来源：设计规格或其一句话需求，点击查看" onclick="openSpec()">规格：—</span>
+  <span class="grow"></span>
+  <span class="wf-err" id="wfErr"></span>
+  <button class="btn sm primary" id="btnSpec" onclick="openSpec()">设计规格</button>
+  <button class="btn sm" id="btnReq" onclick="openReq()" title="只有一句话需求时用：跳过任务分解，直接按关键词生成">快速生成</button>
+  <button class="btn sm" id="btnHist" onclick="openHist()">历史</button>
+  <label class="switch" title="开启后可在画布上拖拽节点、连线、增删节点">
+    <input type="checkbox" id="tglEdit"><span>编辑画布</span>
+  </label>
+  <button class="btn sm" id="btnSave" disabled>保存草稿</button>
+  <button class="btn sm primary" id="btnPublish" disabled>发布版本</button>
+  <select class="select sm" id="selVersion" title="切换查看：草稿或某个已发布版本"></select>
+</div>
+
+<main class="layout">
+  <aside class="rail">
+    <div class="rail-block">
+      <div class="rail-title">运行统计</div>
+      <div class="stat-row"><span>完成</span><b id="stSuccess">0</b></div>
+      <div class="stat-row"><span>运行中</span><b id="stRunning">0</b></div>
+      <div class="stat-row"><span>重试</span><b id="stRetry">0</b></div>
+      <div class="stat-row"><span>跳过</span><b id="stSkip">0</b></div>
+      <div class="stat-row"><span>事件</span><b id="stEvents">0</b></div>
+    </div>
+
+    <div class="rail-block">
+      <div class="rail-title">状态图例</div>
+      <ul class="legend" id="legend"></ul>
+    </div>
+
+    <div class="rail-block" id="paletteBlock" hidden>
+      <div class="rail-title">添加节点</div>
+      <div class="palette">
+        <button class="pal" data-kind="agent" data-role="coder">任务节点</button>
+        <button class="pal" data-kind="condition" data-role="qa">条件判定</button>
+        <button class="pal" data-kind="approval" data-role="human">人工审批</button>
+        <button class="pal" data-kind="start" data-role="system">起点</button>
+        <button class="pal" data-kind="end" data-role="system">终点</button>
+      </div>
+    </div>
+
+    <div class="rail-block">
+      <div class="rail-title">节点库</div>
+      <div class="lib-item"><i style="background:#0ea5e9"></i>Agent 任务</div>
+      <div class="lib-item"><i style="background:#f59e0b"></i>质量门 / 条件</div>
+      <div class="lib-item"><i style="background:#d97706"></i>人工审批</div>
+      <div class="lib-note" id="libNote">画布为只读视图；勾选「编辑画布」后可拖拽、连线、增删节点并保存为草稿。</div>
+    </div>
+  </aside>
+
+  <section class="stage">
+    <div class="banner" id="banner" hidden>
+      <div class="banner-main">
+        <b id="bannerTitle">等待人工审批</b>
+        <span id="bannerDesc"></span>
+      </div>
+      <div class="banner-actions" id="bannerActions"></div>
+    </div>
+
+    <svg id="canvas" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#cbd5e1"></path>
+        </marker>
+        <marker id="arrow-flow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#2563eb"></path>
+        </marker>
+        <marker id="arrow-done" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#16a34a"></path>
+        </marker>
+      </defs>
+      <g id="viewport">
+        <g id="edgeLayer"></g>
+        <g id="nodeLayer"></g>
+      </g>
+    </svg>
+
+    <div class="hud">
+      <div class="hud-row">
+        <span id="hudText">完成 0 / 10</span>
+        <span id="hudPct">0%</span>
+      </div>
+      <div class="bar"><i id="hudBar" style="width:0%"></i></div>
+    </div>
+
+    <div class="zoombar">
+      <button class="zbtn" id="btnZoomIn" title="放大">+</button>
+      <button class="zbtn" id="btnZoomOut" title="缩小">−</button>
+      <button class="zbtn wide" id="btnFit" title="适应窗口">适应</button>
+    </div>
+  </section>
+
+  <aside class="side">
+    <div class="tabs">
+      <button class="tab active" data-tab="detail">节点详情</button>
+      <button class="tab" data-tab="timeline">事件时间线</button>
+    </div>
+    <div class="pane" id="paneDetail">
+      <div class="empty">点击画布中的节点，查看它的配置、质量门、产物与日志。</div>
+    </div>
+    <div class="pane" id="paneTimeline" hidden>
+      <div class="timeline" id="timeline"></div>
+    </div>
+  </aside>
+</main>
+
+<footer class="statusbar">
+  <span id="footLeft">就绪 · 引擎未启动</span>
+  <span class="grow"></span>
+  <span class="hint">提示：断开 SSE 后自动降级为轮询；所有状态变更均以服务端事件为准。</span>
+</footer>
+
+<div class="toast" id="toast"></div>
+
+<!-- 故障提示条：断线 / 请求失败 -->
+<div class="netbanner" id="netBanner" hidden>
+  <span class="net-ico">!</span>
+  <span id="netText">连接异常</span>
+  <button class="btn sm" onclick="retryNet()">重试</button>
+</div>
+
+<!-- 历史回看提示条 -->
+<div class="histbanner" id="histBanner" hidden>
+  <span id="histBannerText">正在回看历史运行</span>
+  <button class="btn sm" onclick="exitHistory()">返回当前</button>
+</div>
+
+<!-- 快速生成：一句话需求（兼容入口，不经过任务分解） -->
+<aside class="panel" id="reqPanel" hidden>
+  <div class="panel-head">
+    <b>快速生成 · 一句话需求</b>
+    <button class="panel-x" onclick="closeReq()" title="关闭">×</button>
+  </div>
+  <div class="panel-body">
+    <div class="panel-hint">只写一句话时的快捷入口：按关键词命中能力域并套用所选模板，<b>不经过</b>任务分解。要按规格逐条拆任务，请用「设计规格」。</div>
+    <textarea id="reqText" rows="4" placeholder="例：做一个内部管理后台，支持账号密码登录和短信验证码，订单支付结算，报表统计导出"></textarea>
+    <div class="ex-chips">
+      <button class="ex" onclick="fillReq('做一个内部管理后台，支持账号密码登录和短信验证码')">登录 + 验证码</button>
+      <button class="ex" onclick="fillReq('电商下单流程：购物车、订单支付、退款对账、消息通知')">下单支付</button>
+      <button class="ex" onclick="fillReq('数据看板：报表统计、多维筛选、导出 Excel，需要权限审计')">报表看板</button>
+    </div>
+    <div class="panel-actions">
+      <select class="select sm" id="selTemplate" title="流程模板：决定能力域词典与阶段编排"></select>
+      <button class="btn primary" id="btnGen" onclick="doGenerate()">生成工作流</button>
+      <span class="panel-note" id="reqNote"></span>
+    </div>
+    <div class="trace" id="reqTrace"></div>
+  </div>
+</aside>
+
+<!-- 设计规格：SE 流程的入口（spec → tasks → DAG） -->
+<aside class="panel spec" id="specPanel" hidden>
+  <div class="panel-head">
+    <b>设计规格 · PM 分解的输入</b>
+    <button class="panel-x" onclick="closeSpec()" title="关闭">×</button>
+  </div>
+  <div class="panel-body">
+    <div class="panel-hint">规格写「要做什么」，模板决定「按什么流程做」。保存后由 PM Agent 分解成任务清单再编排成 DAG。</div>
+    <div class="spec-bar">
+      <select class="select sm" id="specSel" title="切换要编辑的规格"></select>
+      <button class="btn sm" onclick="newSpec()">新建</button>
+      <span class="panel-note" id="specMeta"></span>
+    </div>
+
+    <label class="label-sm" for="specName">规格名称</label>
+    <input class="field" id="specName" maxlength="80" placeholder="例：内部管理后台 v1">
+
+    <label class="label-sm" for="specSummary">一句话摘要 <span class="hint-inline">沿用给生成器做关键词匹配</span></label>
+    <input class="field" id="specSummary" maxlength="200" placeholder="例：做一个内部管理后台，支持登录、订单支付与报表">
+
+    <label class="label-sm" for="specBody">设计规格正文</label>
+    <textarea id="specBody" rows="4" placeholder="背景、目标、范围、关键交互与数据约束……"></textarea>
+
+    <label class="label-sm">模块与验收条款</label>
+    <div id="specModules"></div>
+    <button class="btn sm" onclick="addSpecModule()">+ 添加模块</button>
+
+    <label class="label-sm" for="specConstraints">全局约束 <span class="hint-inline">每行一条</span></label>
+    <textarea id="specConstraints" rows="2" placeholder="例：不新增第三方依赖&#10;密码只存哈希"></textarea>
+
+    <div id="specDecomp" hidden>
+      <div class="decomp-head">
+        <b>任务清单 · PM Agent 分解结果</b>
+        <span class="panel-note" id="specStats"></span>
+      </div>
+      <div class="trace-box" id="specTrace"></div>
+      <div class="task-table-wrap"><table class="task-table" id="specTasks"></table></div>
+    </div>
+  </div>
+  <div class="panel-foot">
+    <button class="btn" id="btnSpecDecompose" onclick="decomposeSpec()">分解预览</button>
+    <button class="btn" id="btnSpecPlan" onclick="planSpec()" title="按已保存的规格和当前模板生成 DAG 草稿">分解并编排</button>
+    <button class="btn primary" id="btnSpecSave" onclick="saveSpec()">保存规格</button>
+    <span class="panel-note" id="specNote"></span>
+  </div>
+</aside>
+
+<!-- 运行历史 -->
+<aside class="panel" id="histPanel" hidden>
+  <div class="panel-head">
+    <b>运行历史</b>
+    <button class="panel-x" onclick="closeHist()" title="关闭">×</button>
+  </div>
+  <div class="panel-body">
+    <div class="panel-hint" id="histHint">最近 20 次已结束的运行，点击任意一条可回看当时的画布与事件。</div>
+    <div class="hist-list" id="histList"><div class="empty" style="padding:14px">加载中…</div></div>
+  </div>
+</aside>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

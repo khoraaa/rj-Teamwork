@@ -1,0 +1,39 @@
+{
+  "id": "enterprise",
+  "name": "企业合规交付流程",
+  "description": "需求受理 → 拆解分工 → 概要设计 → 测试计划先行 → 按能力域串行交付 → 集成验证 → 合规评分分支 → 合规复核/整改 → 评审汇总 →（高风险时）安全合规评审 → 合规负责人审批 → 上线确认 → 归档",
+  "concurrency_limit": 1,
+  "domains": [
+    {"label": "账号与身份", "role": "coder",
+     "keywords": ["登录", "账号", "认证", "身份", "单点", "密码"]},
+    {"label": "资金与支付", "role": "coder",
+     "keywords": ["支付", "资金", "结算", "对账", "退款", "流水"]},
+    {"label": "内容与检索", "role": "coder",
+     "keywords": ["搜索", "内容", "列表", "推荐", "筛选"]},
+    {"label": "触达与通知", "role": "coder",
+     "keywords": ["通知", "消息", "推送", "短信", "邮件"]},
+    {"label": "合规与审计", "role": "architect",
+     "keywords": ["合规", "审计", "权限", "留存", "风控", "隐私"]}
+  ],
+  "risk_words": ["资金", "支付", "合规", "隐私", "生产", "发布", "凭证", "对账"],
+  "pipeline": [
+    {"kind": "start", "name": "需求受理", "role": "system", "max_retries": 0},
+    {"kind": "agent", "name": "需求拆解与责任分工", "role": "pm", "out_schema": "prd-v1"},
+    {"kind": "agent", "name": "概要设计与接口契约", "role": "architect", "out_schema": "design-v1"},
+    {"kind": "agent", "name": "测试计划与用例设计", "role": "qa", "out_schema": "test-v1"},
+    {"kind": "fanout", "source": "domains", "max": 4, "suffix": "交付",
+     "role": "coder", "out_schema": "code-result-v1", "max_retries": 2,
+     "fallback": {"name": "核心模块交付", "role": "coder"}},
+    {"kind": "join", "name": "集成验证", "role": "qa", "join": "any", "out_schema": "verify-v1"},
+    {"kind": "condition", "name": "合规评分", "role": "qa",
+     "expression": "qa_score >= 90", "max_retries": 0},
+    {"kind": "branch", "label": "true", "name": "合规复核", "role": "qa", "out_schema": "scan-v1"},
+    {"kind": "branch", "label": "false", "name": "合规整改", "role": "coder",
+     "out_schema": "code-result-v1"},
+    {"kind": "join", "name": "评审结论汇总", "role": "qa", "join": "any", "out_schema": "verify-v1"},
+    {"kind": "risk_agent", "name": "安全与合规评审", "role": "qa", "out_schema": "scan-v1"},
+    {"kind": "approval", "name": "合规负责人审批", "role": "human", "max_retries": 0},
+    {"kind": "approval", "name": "上线发布确认", "role": "human", "max_retries": 0},
+    {"kind": "end", "name": "归档交付", "role": "system", "max_retries": 0}
+  ]
+}

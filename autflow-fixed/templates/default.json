@@ -1,0 +1,40 @@
+{
+  "id": "default",
+  "name": "标准 SE 流程",
+  "description": "需求输入 → 分析与拆分 → 架构设计 → 按能力域并行实现 → 质量门分支 → 回归/修复 → 合并验证 →（高风险时）安全合规评审 → 上线审批 → 交付",
+  "concurrency_limit": 3,
+  "domains": [
+    {"label": "认证与账号", "role": "coder",
+     "keywords": ["登录", "注册", "账号", "密码", "认证", "鉴权", "验证码", "单点"]},
+    {"label": "交易与支付", "role": "coder",
+     "keywords": ["支付", "订单", "结算", "退款", "购物车", "交易", "对账"]},
+    {"label": "检索与列表", "role": "coder",
+     "keywords": ["搜索", "检索", "查询", "列表", "分页", "筛选", "排序"]},
+    {"label": "数据与报表", "role": "coder",
+     "keywords": ["报表", "统计", "看板", "分析", "大盘", "导出"]},
+    {"label": "通知与消息", "role": "coder",
+     "keywords": ["通知", "消息", "推送", "邮件", "站内信", "订阅"]},
+    {"label": "权限与审计", "role": "architect",
+     "keywords": ["权限", "角色", "审计", "日志", "合规", "风控"]},
+    {"label": "文件与存储", "role": "coder",
+     "keywords": ["文件", "上传", "附件", "图片", "存储", "下载"]}
+  ],
+  "risk_words": ["支付", "资金", "退款", "权限", "隐私", "安全", "合规", "生产", "上线", "凭证"],
+  "pipeline": [
+    {"kind": "start", "name": "需求输入", "role": "system", "max_retries": 0},
+    {"kind": "agent", "name": "需求分析与拆分", "role": "pm", "out_schema": "prd-v1"},
+    {"kind": "agent", "name": "架构与接口设计", "role": "architect", "out_schema": "design-v1"},
+    {"kind": "fanout", "source": "domains", "max": 3, "suffix": "实现",
+     "role": "coder", "out_schema": "code-result-v1", "max_retries": 3,
+     "fallback": {"name": "核心功能实现", "role": "coder"}},
+    {"kind": "condition", "name": "质量门判定", "role": "qa",
+     "expression": "qa_score >= 80", "max_retries": 0},
+    {"kind": "branch", "label": "true", "name": "回归测试", "role": "qa", "out_schema": "test-v1"},
+    {"kind": "branch", "label": "false", "name": "针对性修复与重构", "role": "coder",
+     "out_schema": "code-result-v1"},
+    {"kind": "join", "name": "合并验证", "role": "qa", "join": "any", "out_schema": "verify-v1"},
+    {"kind": "risk_agent", "name": "安全与合规评审", "role": "qa", "out_schema": "scan-v1"},
+    {"kind": "approval", "name": "上线审批", "role": "human", "max_retries": 0},
+    {"kind": "end", "name": "交付完成", "role": "system", "max_retries": 0}
+  ]
+}
