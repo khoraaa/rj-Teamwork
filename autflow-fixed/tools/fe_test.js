@@ -102,6 +102,7 @@ globalThis.document = {
   activeElement: null,
   createElement: (t) => makeEl(t),
   createElementNS: (ns, t) => makeEl(t),
+  getElementById: (id) => byId[id] || makeEl('div'),
   querySelector: (sel) => {
     if (sel.startsWith('#')) return byId[sel.slice(1)] || makeEl('div');
     return makeEl('div');
@@ -130,7 +131,7 @@ svgEl.getBoundingClientRect = () => ({ left: 0, top: 0, width: 1000, height: 800
 stage.getBoundingClientRect = svgEl.getBoundingClientRect;
 
 /* ------------------------------ 加载 app ------------------------------ */
-const src = js + '\nglobalThis.__app = app; globalThis.__fn = { setMode, addNode, connect: connectNodes, editNode, deleteSelection, doSave, doPublish, switchVersion, doStart, doReset, selectNode, selectEdge, render, onPointerMove, onPointerUp, repaintEdgesFor, canvasEdges, doGenerate, openReq, closeReq, openHist, closeHist, viewHistory, exitHistory, refresh, renderWfBar, showNetError, clearNetError };\n';
+const src = js + '\nglobalThis.__app = app; globalThis.__fn = { setMode, addNode, connect: connectNodes, editNode, deleteSelection, doSave, doPublish, switchVersion, doStart, doReset, selectNode, selectEdge, render, onPointerMove, onPointerUp, repaintEdgesFor, canvasEdges, doGenerate, openReq, closeReq, openHist, closeHist, viewHistory, exitHistory, refresh, renderWfBar, showNetError, clearNetError, decomposeSpec, cancelPreview, startPreview, newSpec, backToSavedSpec, isEditable, syncSpecButtons, openSpec, loadSpecs };\n';
 const context = vm.createContext(globalThis);
 vm.runInContext(src, context, { filename: 'app.js' });
 
@@ -357,6 +358,71 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   check(app.frozen === false, '退出历史回看');
   check(byId['histBanner'].hidden === true, '历史提示条隐藏');
   check(app.viewVersion === 'draft' && app.def.name !== '历史测试', '恢复当前草稿');
+
+  console.log('\n[分解预览：流程图直接覆盖画布，可撤销]');
+  const draftNameBefore = app.def.name;
+  const prevDef = {
+    workflow_id: 'wf_login_001', name: '预览规格 · 任务编排', version: null,
+    template: 'default', preview: true, spec_id: 'SP-PREVIEW',
+    nodes: [
+      { id: 'P1', type: 'start', role: 'system', name: '需求输入', deps: [] },
+      { id: 'P2', type: 'agent', role: 'coder', name: '编译实现', deps: ['P1'],
+        out_schema: 'code-result-v1', max_retries: 2 },
+      { id: 'P3', type: 'end', role: 'system', name: '交付', deps: ['P2'] }
+    ],
+    edges: [{ source: 'P1', target: 'P2' }, { source: 'P2', target: 'P3' }]
+  };
+  const prevBody = {
+    ok: true, preview: true, spec: { id: 'SP-PREVIEW', name: '预览规格', revision: 1 },
+    definition: prevDef, template: 'default',
+    tasks: [
+      { id: 'T1', title: '登录接口', role: 'coder', depends_on: [], estimate: 2,
+        acceptance: ['返回 200'], out_schema: 'code-result-v1', source: 'M1' }
+    ],
+    trace: ['M1 → T1'],
+    stats: { modules: 1, tasks: 1, estimate: 2, depth: 2 },
+    graph: { nodes: 3, edges: 2 }
+  };
+  const realSpecId = app.specId;
+  app.specId = 'SP-PREVIEW';
+  globalThis.fetch = (url, opts) => String(url).indexOf('/api/specs/SP-PREVIEW/preview') >= 0
+    ? Promise.resolve({ ok: true, status: 200, json: async () => prevBody })
+    : origFetch(url, opts);
+  await fn.decomposeSpec();
+  globalThis.fetch = origFetch;
+  check(!!app.preview, '进入预览状态（只读预演）');
+  check(app.def && app.def.name === '预览规格 · 任务编排',
+        '预览的流程图直接覆盖了原来的画布');
+  check(app.def.nodes.length === 3, '画布节点来自预演定义（3 节点）');
+  check(app.nodes.every((n) => n.status === 'PENDING'), '预览节点全部按待运行渲染');
+  check(byId['btnSpecDecompose'].textContent === '取消分解预览', '按钮变为「取消分解预览」');
+  check(byId['btnSpecDecompose'].classList.contains('warn'), '按钮切换为警示样式');
+  check(byId['wfState'].textContent.indexOf('预览') >= 0, '工作流栏标注「预览 · 未保存」');
+  check(byId['reqLabel'].textContent.indexOf('预览中') >= 0, '来源标签标注预览中');
+  check(byId['specDecomp'].hidden === false, '任务清单与流程图同时可见');
+  check(fn.isEditable() === false, '预览期间画布不可编辑');
+
+  await fn.cancelPreview();
+  check(app.preview === null, '退出预览状态');
+  check(byId['btnSpecDecompose'].textContent === '分解预览', '按钮恢复为「分解预览」');
+  check(app.def.name === draftNameBefore, '画布回到之前那张图');
+  check(byId['specDecomp'].hidden === true, '任务清单已收起');
+  check(app.mode === 'view', '退出后仍为只读查看草稿');
+  app.specId = realSpecId;          // 预览用的是假规格 ID，恢复真实选中项
+
+  console.log('\n[新建规格可取消，不会是死胡同]');
+  await fn.loadSpecs();                 // 规格列表在打开面板时才拉
+  check((app.specs || []).length > 0, '已加载规格列表（' + (app.specs || []).length + ' 份）');
+  const specBefore = app.specId;
+  fn.newSpec();
+  check(app.specId === null, '新建后不绑定任何已保存规格');
+  check(byId['btnSpecBack'].hidden === false, '出现「取消新建」');
+  check(byId['specSel'].value === '', '下拉框显示「新建规格（未保存）」占位');
+  check(fn.isEditable() === true || app.mode === 'view', '新建表单可编辑');
+  await fn.backToSavedSpec();
+  check(byId['btnSpecBack'].hidden === true, '取消新建后按钮收起');
+  check(!!app.specId && app.specId === specBefore, '回到原来那份规格');
+  check(byId['btnSpecDecompose'].textContent === '分解预览', '预览按钮状态同步复位');
 
   console.log('\n[断线 / 请求失败提示]');
   fn.showNetError('实时连接已断开');

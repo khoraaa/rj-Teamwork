@@ -90,8 +90,8 @@
       "灰度发布，支持按用户分桶与一键回滚"
     ],
     "created_at": "2026-11-15T18:37:45",
-    "updated_at": "2026-11-24T08:33:17",
-    "revision": 5,
+    "updated_at": "2026-11-15T19:05:54",
+    "revision": 1,
     "content_hash": "0cb844dd70ebd3811387bd8f2246386b3fa1d1da6d47612f1b946d076f2f1dee"
   },
   "SP3": {

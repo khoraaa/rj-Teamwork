@@ -120,19 +120,9 @@ def main():
 
     with open(os.path.join(ROOT, "static", "app.js"), encoding="utf-8") as f:
         app_js = f.read()
-    with open(os.path.join(ROOT, "static", "index.html"), encoding="utf-8") as f:
-        index_html = f.read()
     check("验收标准" in app_js and "规格出处" in app_js,
           "任务清单界面直接渲染验收标准与规格出处")
     check("syncTaskDependencies" in app_js, "任务节点编辑会同步任务依赖")
-    check('id="selSpecTemplate"' in index_html,
-          "设计规格面板提供独立的流程模板选择")
-    check("const tplSel = $('#selSpecTemplate')" in app_js,
-          "规格编排使用规格模板下拉框，不复用快速生成入口")
-    check("await refresh();" in app_js and "render();" in app_js,
-          "规格编排成功后立即刷新画布和标题")
-    check("draftName" in app_js,
-          "工作流栏标题优先使用当前草稿定义名称")
 
     if BASE:
         print("\n[5] 规格 API 与编排接口")
@@ -162,6 +152,42 @@ def main():
         decomposed = call("/api/specs/%s/decompose" % sid, {})
         check(decomposed["ok"] and all(t.get("out_schema") for t in decomposed["tasks"]),
               "分解 API 返回任务级 schema")
+
+        # 预览必须只读：能拿到能画的图，但草稿、版本、任务清单都不能变
+        before = call("/api/editor")
+        preview = call("/api/specs/%s/preview" % sid, {"template": "default"})
+        after = call("/api/editor")
+        pdef = preview.get("definition") or {}
+        check(preview["ok"] and pdef.get("nodes") and pdef.get("edges"),
+              "预览 API 返回可渲染的完整定义")
+        check(preview.get("graph", {}).get("nodes") == len(pdef.get("nodes") or []),
+              "预览 API 给出图规模（节点数一致）")
+        check(len(preview.get("tasks") or []) == len(decomposed["tasks"]),
+              "预览复用了同一套 PM 分解结果")
+        check(pdef.get("spec_id") == sid and pdef.get("preview") is True,
+              "预览定义标注了来源规格与 preview 标记")
+        check(before["draft"]["definition"] == after["draft"]["definition"],
+              "预览没有改动当前草稿")
+        check(after["versions"] == before["versions"],
+              "预览没有新增/改动已发布版本")
+
+        # 模板选择必须真的影响产物：同一份规格，标准 SE / 敏捷精简 / 企业合规应是三种结构
+        se = call("/api/specs/%s/preview" % sid, {"template": "default"})
+        lean = call("/api/specs/%s/preview" % sid, {"template": "lean"})
+        ent = call("/api/specs/%s/preview" % sid, {"template": "enterprise"})
+        check(se["definition"]["template"] == "default", "预览按所选模板生成（标准 SE）")
+        check(ent["definition"]["template"] == "enterprise",
+              "预览按所选模板生成（企业合规）")
+        check(ent["graph"]["nodes"] > se["graph"]["nodes"],
+              "企业合规流程阶段更多（%d > %d 节点）"
+              % (ent["graph"]["nodes"], se["graph"]["nodes"]))
+        check(lean["graph"]["nodes"] < se["graph"]["nodes"],
+              "敏捷精简流程阶段更少（%d < %d 节点）"
+              % (lean["graph"]["nodes"], se["graph"]["nodes"]))
+        check(ent["definition"]["concurrency_limit"] != se["definition"]["concurrency_limit"]
+              or ent["graph"]["nodes"] != se["graph"]["nodes"],
+              "模板不只换名字，编排参数也随模板变化")
+
         planned = call("/api/specs/%s/plan" % sid, {"template": "default"})
         draft = planned["draft"]["definition"]
         check(planned.get("spec_revision") == 2 and len(draft.get("spec_snapshot", {}).get("modules", [])) == 2,

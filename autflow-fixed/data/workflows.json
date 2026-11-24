@@ -1,8 +1,8 @@
 {
   "wf_login_001": {
     "id": "wf_login_001",
-    "name": "社区内容平台（小红书式） · 任务编排",
-    "requirement": "做一个图文内容社区：能发笔记、看推荐流、点赞评论关注、内容合规审核",
+    "name": "支付对账中台 · 任务编排",
+    "requirement": "做支付渠道的 T+1 对账：拉流水、比对差异、差错工单与人工核销",
     "versions": [
       {
         "version": "v1",
@@ -182,72 +182,50 @@
     "draft": {
       "definition": {
         "workflow_id": "wf_login_001",
-        "name": "社区内容平台（小红书式） · 任务编排",
+        "name": "支付对账中台 · 任务编排",
         "version": "v1+草稿",
-        "description": "做一个图文内容社区：能发笔记、看推荐流、点赞评论关注、内容合规审核",
-        "requirement": "做一个图文内容社区：能发笔记、看推荐流、点赞评论关注、内容合规审核",
-        "spec_id": "SP2",
-        "spec_revision": 5,
-        "spec_hash": "0cb844dd70ebd3811387bd8f2246386b3fa1d1da6d47612f1b946d076f2f1dee",
+        "description": "做支付渠道的 T+1 对账：拉流水、比对差异、差错工单与人工核销",
+        "requirement": "做支付渠道的 T+1 对账：拉流水、比对差异、差错工单与人工核销",
+        "spec_id": "SP3",
+        "spec_revision": 3,
+        "spec_hash": "620304404992b29dfc6318fa6acc02552687717d8133b510ff1895787ae52a24",
         "spec_snapshot": {
-          "id": "SP2",
-          "name": "社区内容平台（小红书式）",
-          "summary": "做一个图文内容社区：能发笔记、看推荐流、点赞评论关注、内容合规审核",
-          "body": "目标：面向年轻用户的内容社区 MVP。\n核心链路：发布笔记 → 进入推荐池 → 首页信息流分发 → 互动（点赞/评论/关注）→ 站内通知。\n红线：所有公开内容必须先过审核，违规内容不得进入推荐池；审核动作必须留痕可追溯。",
+          "id": "SP3",
+          "name": "支付对账中台",
+          "summary": "做支付渠道的 T+1 对账：拉流水、比对差异、差错工单与人工核销",
+          "body": "我要做微信",
           "modules": [
             {
               "id": "M1",
-              "name": "账号与内容发布",
-              "goal": "登录后发布图文笔记，支持草稿与定时发布",
+              "name": "对账任务调度",
+              "goal": "每日定时拉取渠道对账单并完成逐笔比对",
               "priority": "P0",
               "acceptance": [
-                "支持图文草稿保存与恢复",
-                "发布成功后 3 秒内可被检索到",
-                "违规内容在发布环节即被拦截"
+                "T+1 上午 9 点前产出对账结果",
+                "差异按类型自动分类（金额/状态/单边账）",
+                "任务失败支持按日期重跑且幂等"
               ]
             },
             {
               "id": "M2",
-              "name": "信息流推荐",
-              "goal": "首页推荐流，按兴趣与热度混排",
+              "name": "差错处理与人工核销",
+              "goal": "差错工单的指派、处理、双人复核与留痕",
               "priority": "P0",
               "acceptance": [
-                "首屏渲染 < 800ms",
-                "支持下拉刷新与无限滚动",
-                "同一用户 10 分钟内不重复推荐同一条"
-              ]
-            },
-            {
-              "id": "M3",
-              "name": "互动与通知",
-              "goal": "点赞、评论、关注，以及对应的站内通知",
-              "priority": "P1",
-              "acceptance": [
-                "互动后 1 秒内产生通知",
-                "通知列表区分已读未读",
-                "取关后不再收到该用户通知"
-              ]
-            },
-            {
-              "id": "M4",
-              "name": "内容审核与风控",
-              "goal": "文本敏感词与图片机审，命中转人工复核队列",
-              "priority": "P0",
-              "acceptance": [
-                "敏感词命中率 ≥ 95%",
-                "人工复核队列支持指派与结论回写",
-                "每次审核动作写入审计日志"
+                "工单可指派到人并带 SLA 计时",
+                "核销必须双人复核方可关闭",
+                "全链路操作审计可追溯"
               ]
             }
           ],
           "constraints": [
-            "内容合规须满足《网络信息内容生态治理规定》",
-            "灰度发布，支持按用户分桶与一键回滚"
+            "资金数据只读访问，禁止出内网",
+            "对账差异率需 < 0.01% 才算通过验收"
           ],
           "created_at": "2026-11-15T18:37:45",
-          "updated_at": "2026-11-24T08:33:17",
-          "revision": 5,
-          "content_hash": "0cb844dd70ebd3811387bd8f2246386b3fa1d1da6d47612f1b946d076f2f1dee"
+          "updated_at": "2026-11-15T23:31:09",
+          "revision": 3,
+          "content_hash": "620304404992b29dfc6318fa6acc02552687717d8133b510ff1895787ae52a24"
         },
         "tasks": [
           {
@@ -264,25 +242,25 @@
               "目录结构与模板、规格存放就位"
             ],
             "acceptance_sources": [
-              "SP2/derived/engineering-skeleton",
-              "SP2/derived/engineering-skeleton"
+              "SP3/derived/engineering-skeleton",
+              "SP3/derived/engineering-skeleton"
             ],
-            "spec_ref": "SP2",
-            "spec_revision": 5,
-            "spec_hash": "0cb844dd70ebd3811387bd8f2246386b3fa1d1da6d47612f1b946d076f2f1dee",
+            "spec_ref": "SP3",
+            "spec_revision": 3,
+            "spec_hash": "620304404992b29dfc6318fa6acc02552687717d8133b510ff1895787ae52a24",
             "kind": "foundation",
             "out_schema": "code-result-v1",
             "source": {
-              "spec_id": "SP2",
-              "revision": 5,
+              "spec_id": "SP3",
+              "revision": 3,
               "module_id": "",
               "module_name": ""
             }
           },
           {
             "id": "T2",
-            "title": "「账号与内容发布」方案与接口设计",
-            "module": "账号与内容发布",
+            "title": "「对账任务调度」方案与接口设计",
+            "module": "对账任务调度",
             "module_id": "M1",
             "role": "架构师",
             "priority": "P0",
@@ -295,25 +273,25 @@
               "与规格验收条款逐条对齐"
             ],
             "acceptance_sources": [
-              "SP2/M1/derived/design",
-              "SP2/M1/acceptance"
+              "SP3/M1/derived/design",
+              "SP3/M1/acceptance"
             ],
-            "spec_ref": "SP2/M1",
-            "spec_revision": 5,
-            "spec_hash": "0cb844dd70ebd3811387bd8f2246386b3fa1d1da6d47612f1b946d076f2f1dee",
+            "spec_ref": "SP3/M1",
+            "spec_revision": 3,
+            "spec_hash": "620304404992b29dfc6318fa6acc02552687717d8133b510ff1895787ae52a24",
             "kind": "design",
             "out_schema": "design-v1",
             "source": {
-              "spec_id": "SP2",
-              "revision": 5,
+              "spec_id": "SP3",
+              "revision": 3,
               "module_id": "M1",
-              "module_name": "账号与内容发布"
+              "module_name": "对账任务调度"
             }
           },
           {
             "id": "T3",
-            "title": "「账号与内容发布」功能实现",
-            "module": "账号与内容发布",
+            "title": "「对账任务调度」功能实现",
+            "module": "对账任务调度",
             "module_id": "M1",
             "role": "后端",
             "priority": "P0",
@@ -322,31 +300,31 @@
               "T2"
             ],
             "acceptance": [
-              "支持图文草稿保存与恢复",
-              "发布成功后 3 秒内可被检索到",
-              "违规内容在发布环节即被拦截"
+              "T+1 上午 9 点前产出对账结果",
+              "差异按类型自动分类（金额/状态/单边账）",
+              "任务失败支持按日期重跑且幂等"
             ],
             "acceptance_sources": [
-              "SP2/M1/acceptance/1",
-              "SP2/M1/acceptance/2",
-              "SP2/M1/acceptance/3"
+              "SP3/M1/acceptance/1",
+              "SP3/M1/acceptance/2",
+              "SP3/M1/acceptance/3"
             ],
-            "spec_ref": "SP2/M1",
-            "spec_revision": 5,
-            "spec_hash": "0cb844dd70ebd3811387bd8f2246386b3fa1d1da6d47612f1b946d076f2f1dee",
+            "spec_ref": "SP3/M1",
+            "spec_revision": 3,
+            "spec_hash": "620304404992b29dfc6318fa6acc02552687717d8133b510ff1895787ae52a24",
             "kind": "implementation",
             "out_schema": "code-result-v1",
             "source": {
-              "spec_id": "SP2",
-              "revision": 5,
+              "spec_id": "SP3",
+              "revision": 3,
               "module_id": "M1",
-              "module_name": "账号与内容发布"
+              "module_name": "对账任务调度"
             }
           },
           {
             "id": "T4",
-            "title": "「账号与内容发布」验收与回归",
-            "module": "账号与内容发布",
+            "title": "「对账任务调度」验收与回归",
+            "module": "对账任务调度",
             "module_id": "M1",
             "role": "测试",
             "priority": "P0",
@@ -355,31 +333,31 @@
               "T3"
             ],
             "acceptance": [
-              "支持图文草稿保存与恢复",
-              "发布成功后 3 秒内可被检索到",
-              "违规内容在发布环节即被拦截"
+              "T+1 上午 9 点前产出对账结果",
+              "差异按类型自动分类（金额/状态/单边账）",
+              "任务失败支持按日期重跑且幂等"
             ],
             "acceptance_sources": [
-              "SP2/M1/acceptance/1",
-              "SP2/M1/acceptance/2",
-              "SP2/M1/acceptance/3"
+              "SP3/M1/acceptance/1",
+              "SP3/M1/acceptance/2",
+              "SP3/M1/acceptance/3"
             ],
-            "spec_ref": "SP2/M1",
-            "spec_revision": 5,
-            "spec_hash": "0cb844dd70ebd3811387bd8f2246386b3fa1d1da6d47612f1b946d076f2f1dee",
+            "spec_ref": "SP3/M1",
+            "spec_revision": 3,
+            "spec_hash": "620304404992b29dfc6318fa6acc02552687717d8133b510ff1895787ae52a24",
             "kind": "verification",
             "out_schema": "test-v1",
             "source": {
-              "spec_id": "SP2",
-              "revision": 5,
+              "spec_id": "SP3",
+              "revision": 3,
               "module_id": "M1",
-              "module_name": "账号与内容发布"
+              "module_name": "对账任务调度"
             }
           },
           {
             "id": "T5",
-            "title": "「信息流推荐」方案与接口设计",
-            "module": "信息流推荐",
+            "title": "「差错处理与人工核销」方案与接口设计",
+            "module": "差错处理与人工核销",
             "module_id": "M2",
             "role": "架构师",
             "priority": "P0",
@@ -392,25 +370,25 @@
               "与规格验收条款逐条对齐"
             ],
             "acceptance_sources": [
-              "SP2/M2/derived/design",
-              "SP2/M2/acceptance"
+              "SP3/M2/derived/design",
+              "SP3/M2/acceptance"
             ],
-            "spec_ref": "SP2/M2",
-            "spec_revision": 5,
-            "spec_hash": "0cb844dd70ebd3811387bd8f2246386b3fa1d1da6d47612f1b946d076f2f1dee",
+            "spec_ref": "SP3/M2",
+            "spec_revision": 3,
+            "spec_hash": "620304404992b29dfc6318fa6acc02552687717d8133b510ff1895787ae52a24",
             "kind": "design",
             "out_schema": "design-v1",
             "source": {
-              "spec_id": "SP2",
-              "revision": 5,
+              "spec_id": "SP3",
+              "revision": 3,
               "module_id": "M2",
-              "module_name": "信息流推荐"
+              "module_name": "差错处理与人工核销"
             }
           },
           {
             "id": "T6",
-            "title": "「信息流推荐」功能实现",
-            "module": "信息流推荐",
+            "title": "「差错处理与人工核销」功能实现",
+            "module": "差错处理与人工核销",
             "module_id": "M2",
             "role": "后端",
             "priority": "P0",
@@ -419,31 +397,31 @@
               "T5"
             ],
             "acceptance": [
-              "首屏渲染 < 800ms",
-              "支持下拉刷新与无限滚动",
-              "同一用户 10 分钟内不重复推荐同一条"
+              "工单可指派到人并带 SLA 计时",
+              "核销必须双人复核方可关闭",
+              "全链路操作审计可追溯"
             ],
             "acceptance_sources": [
-              "SP2/M2/acceptance/1",
-              "SP2/M2/acceptance/2",
-              "SP2/M2/acceptance/3"
+              "SP3/M2/acceptance/1",
+              "SP3/M2/acceptance/2",
+              "SP3/M2/acceptance/3"
             ],
-            "spec_ref": "SP2/M2",
-            "spec_revision": 5,
-            "spec_hash": "0cb844dd70ebd3811387bd8f2246386b3fa1d1da6d47612f1b946d076f2f1dee",
+            "spec_ref": "SP3/M2",
+            "spec_revision": 3,
+            "spec_hash": "620304404992b29dfc6318fa6acc02552687717d8133b510ff1895787ae52a24",
             "kind": "implementation",
             "out_schema": "code-result-v1",
             "source": {
-              "spec_id": "SP2",
-              "revision": 5,
+              "spec_id": "SP3",
+              "revision": 3,
               "module_id": "M2",
-              "module_name": "信息流推荐"
+              "module_name": "差错处理与人工核销"
             }
           },
           {
             "id": "T7",
-            "title": "「信息流推荐」验收与回归",
-            "module": "信息流推荐",
+            "title": "「差错处理与人工核销」验收与回归",
+            "module": "差错处理与人工核销",
             "module_id": "M2",
             "role": "测试",
             "priority": "P0",
@@ -452,192 +430,29 @@
               "T6"
             ],
             "acceptance": [
-              "首屏渲染 < 800ms",
-              "支持下拉刷新与无限滚动",
-              "同一用户 10 分钟内不重复推荐同一条"
+              "工单可指派到人并带 SLA 计时",
+              "核销必须双人复核方可关闭",
+              "全链路操作审计可追溯"
             ],
             "acceptance_sources": [
-              "SP2/M2/acceptance/1",
-              "SP2/M2/acceptance/2",
-              "SP2/M2/acceptance/3"
+              "SP3/M2/acceptance/1",
+              "SP3/M2/acceptance/2",
+              "SP3/M2/acceptance/3"
             ],
-            "spec_ref": "SP2/M2",
-            "spec_revision": 5,
-            "spec_hash": "0cb844dd70ebd3811387bd8f2246386b3fa1d1da6d47612f1b946d076f2f1dee",
+            "spec_ref": "SP3/M2",
+            "spec_revision": 3,
+            "spec_hash": "620304404992b29dfc6318fa6acc02552687717d8133b510ff1895787ae52a24",
             "kind": "verification",
             "out_schema": "test-v1",
             "source": {
-              "spec_id": "SP2",
-              "revision": 5,
+              "spec_id": "SP3",
+              "revision": 3,
               "module_id": "M2",
-              "module_name": "信息流推荐"
+              "module_name": "差错处理与人工核销"
             }
           },
           {
             "id": "T8",
-            "title": "「互动与通知」功能实现",
-            "module": "互动与通知",
-            "module_id": "M3",
-            "role": "后端",
-            "priority": "P1",
-            "estimate": 4,
-            "depends_on": [
-              "T1"
-            ],
-            "acceptance": [
-              "互动后 1 秒内产生通知",
-              "通知列表区分已读未读",
-              "取关后不再收到该用户通知"
-            ],
-            "acceptance_sources": [
-              "SP2/M3/acceptance/1",
-              "SP2/M3/acceptance/2",
-              "SP2/M3/acceptance/3"
-            ],
-            "spec_ref": "SP2/M3",
-            "spec_revision": 5,
-            "spec_hash": "0cb844dd70ebd3811387bd8f2246386b3fa1d1da6d47612f1b946d076f2f1dee",
-            "kind": "implementation",
-            "out_schema": "code-result-v1",
-            "source": {
-              "spec_id": "SP2",
-              "revision": 5,
-              "module_id": "M3",
-              "module_name": "互动与通知"
-            }
-          },
-          {
-            "id": "T9",
-            "title": "「互动与通知」验收与回归",
-            "module": "互动与通知",
-            "module_id": "M3",
-            "role": "测试",
-            "priority": "P1",
-            "estimate": 2,
-            "depends_on": [
-              "T8"
-            ],
-            "acceptance": [
-              "互动后 1 秒内产生通知",
-              "通知列表区分已读未读",
-              "取关后不再收到该用户通知"
-            ],
-            "acceptance_sources": [
-              "SP2/M3/acceptance/1",
-              "SP2/M3/acceptance/2",
-              "SP2/M3/acceptance/3"
-            ],
-            "spec_ref": "SP2/M3",
-            "spec_revision": 5,
-            "spec_hash": "0cb844dd70ebd3811387bd8f2246386b3fa1d1da6d47612f1b946d076f2f1dee",
-            "kind": "verification",
-            "out_schema": "test-v1",
-            "source": {
-              "spec_id": "SP2",
-              "revision": 5,
-              "module_id": "M3",
-              "module_name": "互动与通知"
-            }
-          },
-          {
-            "id": "T10",
-            "title": "「内容审核与风控」方案与接口设计",
-            "module": "内容审核与风控",
-            "module_id": "M4",
-            "role": "架构师",
-            "priority": "P0",
-            "estimate": 2,
-            "depends_on": [
-              "T1"
-            ],
-            "acceptance": [
-              "输出接口与数据结构说明",
-              "与规格验收条款逐条对齐"
-            ],
-            "acceptance_sources": [
-              "SP2/M4/derived/design",
-              "SP2/M4/acceptance"
-            ],
-            "spec_ref": "SP2/M4",
-            "spec_revision": 5,
-            "spec_hash": "0cb844dd70ebd3811387bd8f2246386b3fa1d1da6d47612f1b946d076f2f1dee",
-            "kind": "design",
-            "out_schema": "design-v1",
-            "source": {
-              "spec_id": "SP2",
-              "revision": 5,
-              "module_id": "M4",
-              "module_name": "内容审核与风控"
-            }
-          },
-          {
-            "id": "T11",
-            "title": "「内容审核与风控」功能实现",
-            "module": "内容审核与风控",
-            "module_id": "M4",
-            "role": "后端",
-            "priority": "P0",
-            "estimate": 6,
-            "depends_on": [
-              "T10"
-            ],
-            "acceptance": [
-              "敏感词命中率 ≥ 95%",
-              "人工复核队列支持指派与结论回写",
-              "每次审核动作写入审计日志"
-            ],
-            "acceptance_sources": [
-              "SP2/M4/acceptance/1",
-              "SP2/M4/acceptance/2",
-              "SP2/M4/acceptance/3"
-            ],
-            "spec_ref": "SP2/M4",
-            "spec_revision": 5,
-            "spec_hash": "0cb844dd70ebd3811387bd8f2246386b3fa1d1da6d47612f1b946d076f2f1dee",
-            "kind": "implementation",
-            "out_schema": "code-result-v1",
-            "source": {
-              "spec_id": "SP2",
-              "revision": 5,
-              "module_id": "M4",
-              "module_name": "内容审核与风控"
-            }
-          },
-          {
-            "id": "T12",
-            "title": "「内容审核与风控」验收与回归",
-            "module": "内容审核与风控",
-            "module_id": "M4",
-            "role": "测试",
-            "priority": "P0",
-            "estimate": 2,
-            "depends_on": [
-              "T11"
-            ],
-            "acceptance": [
-              "敏感词命中率 ≥ 95%",
-              "人工复核队列支持指派与结论回写",
-              "每次审核动作写入审计日志"
-            ],
-            "acceptance_sources": [
-              "SP2/M4/acceptance/1",
-              "SP2/M4/acceptance/2",
-              "SP2/M4/acceptance/3"
-            ],
-            "spec_ref": "SP2/M4",
-            "spec_revision": 5,
-            "spec_hash": "0cb844dd70ebd3811387bd8f2246386b3fa1d1da6d47612f1b946d076f2f1dee",
-            "kind": "verification",
-            "out_schema": "test-v1",
-            "source": {
-              "spec_id": "SP2",
-              "revision": 5,
-              "module_id": "M4",
-              "module_name": "内容审核与风控"
-            }
-          },
-          {
-            "id": "T13",
             "title": "集成联调与整体验收",
             "module": "",
             "module_id": "",
@@ -646,52 +461,50 @@
             "estimate": 2,
             "depends_on": [
               "T4",
-              "T7",
-              "T9",
-              "T12"
+              "T7"
             ],
             "acceptance": [
               "端到端跑通主流程",
               "回归既有功能无退化",
-              "内容合规须满足《网络信息内容生态治理规定》",
-              "灰度发布，支持按用户分桶与一键回滚"
+              "资金数据只读访问，禁止出内网",
+              "对账差异率需 < 0.01% 才算通过验收"
             ],
             "acceptance_sources": [
-              "SP2/derived/integration-e2e",
-              "SP2/derived/integration-regression",
-              "SP2/constraints/1",
-              "SP2/constraints/2"
+              "SP3/derived/integration-e2e",
+              "SP3/derived/integration-regression",
+              "SP3/constraints/1",
+              "SP3/constraints/2"
             ],
-            "spec_ref": "SP2",
-            "spec_revision": 5,
-            "spec_hash": "0cb844dd70ebd3811387bd8f2246386b3fa1d1da6d47612f1b946d076f2f1dee",
+            "spec_ref": "SP3",
+            "spec_revision": 3,
+            "spec_hash": "620304404992b29dfc6318fa6acc02552687717d8133b510ff1895787ae52a24",
             "kind": "integration",
             "out_schema": "test-v1",
             "source": {
-              "spec_id": "SP2",
-              "revision": 5,
+              "spec_id": "SP3",
+              "revision": 3,
               "module_id": "",
               "module_name": ""
             }
           }
         ],
-        "concurrency_limit": 1,
-        "template": "enterprise",
+        "concurrency_limit": 3,
+        "template": "default",
         "nodes": [
           {
             "id": "N1",
             "type": "start",
             "role": "system",
-            "name": "需求受理",
+            "name": "需求输入",
             "deps": [],
             "max_retries": 0,
-            "description": "做一个图文内容社区：能发笔记、看推荐流、点赞评论关注、内容合规审核"
+            "description": "做支付渠道的 T+1 对账：拉流水、比对差异、差错工单与人工核销"
           },
           {
             "id": "N2",
             "type": "agent",
             "role": "pm",
-            "name": "需求拆解与责任分工",
+            "name": "需求分析与拆分",
             "deps": [
               "N1"
             ],
@@ -702,7 +515,7 @@
             "id": "N3",
             "type": "agent",
             "role": "architect",
-            "name": "概要设计与接口契约",
+            "name": "架构与接口设计",
             "deps": [
               "N2"
             ],
@@ -712,27 +525,16 @@
           {
             "id": "N4",
             "type": "agent",
-            "role": "qa",
-            "name": "测试计划与用例设计",
-            "deps": [
-              "N3"
-            ],
-            "max_retries": 2,
-            "out_schema": "test-v1"
-          },
-          {
-            "id": "N5",
-            "type": "agent",
             "role": "coder",
             "name": "T1 工程骨架与环境搭建",
             "deps": [
-              "N4"
+              "N3"
             ],
-            "max_retries": 2,
+            "max_retries": 3,
             "out_schema": "code-result-v1",
             "task_id": "T1",
             "module": "",
-            "spec_ref": "SP2",
+            "spec_ref": "SP3",
             "priority": "P0",
             "estimate": 1,
             "acceptance": [
@@ -740,111 +542,111 @@
               "目录结构与模板、规格存放就位"
             ],
             "acceptance_sources": [
-              "SP2/derived/engineering-skeleton",
-              "SP2/derived/engineering-skeleton"
+              "SP3/derived/engineering-skeleton",
+              "SP3/derived/engineering-skeleton"
             ],
             "kind": "foundation",
-            "spec_revision": 5,
-            "spec_hash": "0cb844dd70ebd3811387bd8f2246386b3fa1d1da6d47612f1b946d076f2f1dee"
+            "spec_revision": 3,
+            "spec_hash": "620304404992b29dfc6318fa6acc02552687717d8133b510ff1895787ae52a24"
+          },
+          {
+            "id": "N5",
+            "type": "agent",
+            "role": "architect",
+            "name": "T2 「对账任务调度」方案与接口设计",
+            "deps": [
+              "N4"
+            ],
+            "max_retries": 3,
+            "out_schema": "design-v1",
+            "task_id": "T2",
+            "module": "对账任务调度",
+            "spec_ref": "SP3/M1",
+            "priority": "P0",
+            "estimate": 2,
+            "acceptance": [
+              "输出接口与数据结构说明",
+              "与规格验收条款逐条对齐"
+            ],
+            "acceptance_sources": [
+              "SP3/M1/derived/design",
+              "SP3/M1/acceptance"
+            ],
+            "kind": "design",
+            "spec_revision": 3,
+            "spec_hash": "620304404992b29dfc6318fa6acc02552687717d8133b510ff1895787ae52a24"
           },
           {
             "id": "N6",
             "type": "agent",
-            "role": "architect",
-            "name": "T2 「账号与内容发布」方案与接口设计",
+            "role": "coder",
+            "name": "T3 「对账任务调度」功能实现",
             "deps": [
               "N5"
             ],
-            "max_retries": 2,
-            "out_schema": "design-v1",
-            "task_id": "T2",
-            "module": "账号与内容发布",
-            "spec_ref": "SP2/M1",
+            "max_retries": 3,
+            "out_schema": "code-result-v1",
+            "task_id": "T3",
+            "module": "对账任务调度",
+            "spec_ref": "SP3/M1",
             "priority": "P0",
-            "estimate": 2,
+            "estimate": 6,
             "acceptance": [
-              "输出接口与数据结构说明",
-              "与规格验收条款逐条对齐"
+              "T+1 上午 9 点前产出对账结果",
+              "差异按类型自动分类（金额/状态/单边账）",
+              "任务失败支持按日期重跑且幂等"
             ],
             "acceptance_sources": [
-              "SP2/M1/derived/design",
-              "SP2/M1/acceptance"
+              "SP3/M1/acceptance/1",
+              "SP3/M1/acceptance/2",
+              "SP3/M1/acceptance/3"
             ],
-            "kind": "design",
-            "spec_revision": 5,
-            "spec_hash": "0cb844dd70ebd3811387bd8f2246386b3fa1d1da6d47612f1b946d076f2f1dee"
+            "kind": "implementation",
+            "spec_revision": 3,
+            "spec_hash": "620304404992b29dfc6318fa6acc02552687717d8133b510ff1895787ae52a24"
           },
           {
             "id": "N7",
             "type": "agent",
-            "role": "coder",
-            "name": "T3 「账号与内容发布」功能实现",
+            "role": "qa",
+            "name": "T4 「对账任务调度」验收与回归",
             "deps": [
               "N6"
             ],
-            "max_retries": 2,
-            "out_schema": "code-result-v1",
-            "task_id": "T3",
-            "module": "账号与内容发布",
-            "spec_ref": "SP2/M1",
+            "max_retries": 3,
+            "out_schema": "test-v1",
+            "task_id": "T4",
+            "module": "对账任务调度",
+            "spec_ref": "SP3/M1",
             "priority": "P0",
-            "estimate": 6,
+            "estimate": 2,
             "acceptance": [
-              "支持图文草稿保存与恢复",
-              "发布成功后 3 秒内可被检索到",
-              "违规内容在发布环节即被拦截"
+              "T+1 上午 9 点前产出对账结果",
+              "差异按类型自动分类（金额/状态/单边账）",
+              "任务失败支持按日期重跑且幂等"
             ],
             "acceptance_sources": [
-              "SP2/M1/acceptance/1",
-              "SP2/M1/acceptance/2",
-              "SP2/M1/acceptance/3"
+              "SP3/M1/acceptance/1",
+              "SP3/M1/acceptance/2",
+              "SP3/M1/acceptance/3"
             ],
-            "kind": "implementation",
-            "spec_revision": 5,
-            "spec_hash": "0cb844dd70ebd3811387bd8f2246386b3fa1d1da6d47612f1b946d076f2f1dee"
+            "kind": "verification",
+            "spec_revision": 3,
+            "spec_hash": "620304404992b29dfc6318fa6acc02552687717d8133b510ff1895787ae52a24"
           },
           {
             "id": "N8",
             "type": "agent",
-            "role": "qa",
-            "name": "T4 「账号与内容发布」验收与回归",
-            "deps": [
-              "N7"
-            ],
-            "max_retries": 2,
-            "out_schema": "test-v1",
-            "task_id": "T4",
-            "module": "账号与内容发布",
-            "spec_ref": "SP2/M1",
-            "priority": "P0",
-            "estimate": 2,
-            "acceptance": [
-              "支持图文草稿保存与恢复",
-              "发布成功后 3 秒内可被检索到",
-              "违规内容在发布环节即被拦截"
-            ],
-            "acceptance_sources": [
-              "SP2/M1/acceptance/1",
-              "SP2/M1/acceptance/2",
-              "SP2/M1/acceptance/3"
-            ],
-            "kind": "verification",
-            "spec_revision": 5,
-            "spec_hash": "0cb844dd70ebd3811387bd8f2246386b3fa1d1da6d47612f1b946d076f2f1dee"
-          },
-          {
-            "id": "N9",
-            "type": "agent",
             "role": "architect",
-            "name": "T5 「信息流推荐」方案与接口设计",
+            "name": "T5 「差错处理与人工核销」方案与接口设计",
             "deps": [
-              "N5"
+              "N4"
             ],
-            "max_retries": 2,
+            "max_retries": 3,
             "out_schema": "design-v1",
             "task_id": "T5",
-            "module": "信息流推荐",
-            "spec_ref": "SP2/M2",
+            "module": "差错处理与人工核销",
+            "spec_ref": "SP3/M2",
             "priority": "P0",
             "estimate": 2,
             "acceptance": [
@@ -852,344 +654,177 @@
               "与规格验收条款逐条对齐"
             ],
             "acceptance_sources": [
-              "SP2/M2/derived/design",
-              "SP2/M2/acceptance"
+              "SP3/M2/derived/design",
+              "SP3/M2/acceptance"
             ],
             "kind": "design",
-            "spec_revision": 5,
-            "spec_hash": "0cb844dd70ebd3811387bd8f2246386b3fa1d1da6d47612f1b946d076f2f1dee"
+            "spec_revision": 3,
+            "spec_hash": "620304404992b29dfc6318fa6acc02552687717d8133b510ff1895787ae52a24"
+          },
+          {
+            "id": "N9",
+            "type": "agent",
+            "role": "coder",
+            "name": "T6 「差错处理与人工核销」功能实现",
+            "deps": [
+              "N8"
+            ],
+            "max_retries": 3,
+            "out_schema": "code-result-v1",
+            "task_id": "T6",
+            "module": "差错处理与人工核销",
+            "spec_ref": "SP3/M2",
+            "priority": "P0",
+            "estimate": 6,
+            "acceptance": [
+              "工单可指派到人并带 SLA 计时",
+              "核销必须双人复核方可关闭",
+              "全链路操作审计可追溯"
+            ],
+            "acceptance_sources": [
+              "SP3/M2/acceptance/1",
+              "SP3/M2/acceptance/2",
+              "SP3/M2/acceptance/3"
+            ],
+            "kind": "implementation",
+            "spec_revision": 3,
+            "spec_hash": "620304404992b29dfc6318fa6acc02552687717d8133b510ff1895787ae52a24"
           },
           {
             "id": "N10",
             "type": "agent",
-            "role": "coder",
-            "name": "T6 「信息流推荐」功能实现",
+            "role": "qa",
+            "name": "T7 「差错处理与人工核销」验收与回归",
             "deps": [
               "N9"
             ],
-            "max_retries": 2,
-            "out_schema": "code-result-v1",
-            "task_id": "T6",
-            "module": "信息流推荐",
-            "spec_ref": "SP2/M2",
+            "max_retries": 3,
+            "out_schema": "test-v1",
+            "task_id": "T7",
+            "module": "差错处理与人工核销",
+            "spec_ref": "SP3/M2",
             "priority": "P0",
-            "estimate": 6,
+            "estimate": 2,
             "acceptance": [
-              "首屏渲染 < 800ms",
-              "支持下拉刷新与无限滚动",
-              "同一用户 10 分钟内不重复推荐同一条"
+              "工单可指派到人并带 SLA 计时",
+              "核销必须双人复核方可关闭",
+              "全链路操作审计可追溯"
             ],
             "acceptance_sources": [
-              "SP2/M2/acceptance/1",
-              "SP2/M2/acceptance/2",
-              "SP2/M2/acceptance/3"
+              "SP3/M2/acceptance/1",
+              "SP3/M2/acceptance/2",
+              "SP3/M2/acceptance/3"
             ],
-            "kind": "implementation",
-            "spec_revision": 5,
-            "spec_hash": "0cb844dd70ebd3811387bd8f2246386b3fa1d1da6d47612f1b946d076f2f1dee"
+            "kind": "verification",
+            "spec_revision": 3,
+            "spec_hash": "620304404992b29dfc6318fa6acc02552687717d8133b510ff1895787ae52a24"
           },
           {
             "id": "N11",
             "type": "agent",
             "role": "qa",
-            "name": "T7 「信息流推荐」验收与回归",
+            "name": "T8 集成联调与整体验收",
             "deps": [
+              "N7",
               "N10"
             ],
-            "max_retries": 2,
+            "max_retries": 3,
             "out_schema": "test-v1",
-            "task_id": "T7",
-            "module": "信息流推荐",
-            "spec_ref": "SP2/M2",
-            "priority": "P0",
-            "estimate": 2,
-            "acceptance": [
-              "首屏渲染 < 800ms",
-              "支持下拉刷新与无限滚动",
-              "同一用户 10 分钟内不重复推荐同一条"
-            ],
-            "acceptance_sources": [
-              "SP2/M2/acceptance/1",
-              "SP2/M2/acceptance/2",
-              "SP2/M2/acceptance/3"
-            ],
-            "kind": "verification",
-            "spec_revision": 5,
-            "spec_hash": "0cb844dd70ebd3811387bd8f2246386b3fa1d1da6d47612f1b946d076f2f1dee"
-          },
-          {
-            "id": "N12",
-            "type": "agent",
-            "role": "coder",
-            "name": "T8 「互动与通知」功能实现",
-            "deps": [
-              "N5"
-            ],
-            "max_retries": 2,
-            "out_schema": "code-result-v1",
             "task_id": "T8",
-            "module": "互动与通知",
-            "spec_ref": "SP2/M3",
-            "priority": "P1",
-            "estimate": 4,
-            "acceptance": [
-              "互动后 1 秒内产生通知",
-              "通知列表区分已读未读",
-              "取关后不再收到该用户通知"
-            ],
-            "acceptance_sources": [
-              "SP2/M3/acceptance/1",
-              "SP2/M3/acceptance/2",
-              "SP2/M3/acceptance/3"
-            ],
-            "kind": "implementation",
-            "spec_revision": 5,
-            "spec_hash": "0cb844dd70ebd3811387bd8f2246386b3fa1d1da6d47612f1b946d076f2f1dee"
-          },
-          {
-            "id": "N13",
-            "type": "agent",
-            "role": "qa",
-            "name": "T9 「互动与通知」验收与回归",
-            "deps": [
-              "N12"
-            ],
-            "max_retries": 2,
-            "out_schema": "test-v1",
-            "task_id": "T9",
-            "module": "互动与通知",
-            "spec_ref": "SP2/M3",
-            "priority": "P1",
-            "estimate": 2,
-            "acceptance": [
-              "互动后 1 秒内产生通知",
-              "通知列表区分已读未读",
-              "取关后不再收到该用户通知"
-            ],
-            "acceptance_sources": [
-              "SP2/M3/acceptance/1",
-              "SP2/M3/acceptance/2",
-              "SP2/M3/acceptance/3"
-            ],
-            "kind": "verification",
-            "spec_revision": 5,
-            "spec_hash": "0cb844dd70ebd3811387bd8f2246386b3fa1d1da6d47612f1b946d076f2f1dee"
-          },
-          {
-            "id": "N14",
-            "type": "agent",
-            "role": "architect",
-            "name": "T10 「内容审核与风控」方案与接口设计",
-            "deps": [
-              "N5"
-            ],
-            "max_retries": 2,
-            "out_schema": "design-v1",
-            "task_id": "T10",
-            "module": "内容审核与风控",
-            "spec_ref": "SP2/M4",
-            "priority": "P0",
-            "estimate": 2,
-            "acceptance": [
-              "输出接口与数据结构说明",
-              "与规格验收条款逐条对齐"
-            ],
-            "acceptance_sources": [
-              "SP2/M4/derived/design",
-              "SP2/M4/acceptance"
-            ],
-            "kind": "design",
-            "spec_revision": 5,
-            "spec_hash": "0cb844dd70ebd3811387bd8f2246386b3fa1d1da6d47612f1b946d076f2f1dee"
-          },
-          {
-            "id": "N15",
-            "type": "agent",
-            "role": "coder",
-            "name": "T11 「内容审核与风控」功能实现",
-            "deps": [
-              "N14"
-            ],
-            "max_retries": 2,
-            "out_schema": "code-result-v1",
-            "task_id": "T11",
-            "module": "内容审核与风控",
-            "spec_ref": "SP2/M4",
-            "priority": "P0",
-            "estimate": 6,
-            "acceptance": [
-              "敏感词命中率 ≥ 95%",
-              "人工复核队列支持指派与结论回写",
-              "每次审核动作写入审计日志"
-            ],
-            "acceptance_sources": [
-              "SP2/M4/acceptance/1",
-              "SP2/M4/acceptance/2",
-              "SP2/M4/acceptance/3"
-            ],
-            "kind": "implementation",
-            "spec_revision": 5,
-            "spec_hash": "0cb844dd70ebd3811387bd8f2246386b3fa1d1da6d47612f1b946d076f2f1dee"
-          },
-          {
-            "id": "N16",
-            "type": "agent",
-            "role": "qa",
-            "name": "T12 「内容审核与风控」验收与回归",
-            "deps": [
-              "N15"
-            ],
-            "max_retries": 2,
-            "out_schema": "test-v1",
-            "task_id": "T12",
-            "module": "内容审核与风控",
-            "spec_ref": "SP2/M4",
-            "priority": "P0",
-            "estimate": 2,
-            "acceptance": [
-              "敏感词命中率 ≥ 95%",
-              "人工复核队列支持指派与结论回写",
-              "每次审核动作写入审计日志"
-            ],
-            "acceptance_sources": [
-              "SP2/M4/acceptance/1",
-              "SP2/M4/acceptance/2",
-              "SP2/M4/acceptance/3"
-            ],
-            "kind": "verification",
-            "spec_revision": 5,
-            "spec_hash": "0cb844dd70ebd3811387bd8f2246386b3fa1d1da6d47612f1b946d076f2f1dee"
-          },
-          {
-            "id": "N17",
-            "type": "agent",
-            "role": "qa",
-            "name": "T13 集成联调与整体验收",
-            "deps": [
-              "N8",
-              "N11",
-              "N13",
-              "N16"
-            ],
-            "max_retries": 2,
-            "out_schema": "test-v1",
-            "task_id": "T13",
             "module": "",
-            "spec_ref": "SP2",
+            "spec_ref": "SP3",
             "priority": "P0",
             "estimate": 2,
             "acceptance": [
               "端到端跑通主流程",
               "回归既有功能无退化",
-              "内容合规须满足《网络信息内容生态治理规定》",
-              "灰度发布，支持按用户分桶与一键回滚"
+              "资金数据只读访问，禁止出内网",
+              "对账差异率需 < 0.01% 才算通过验收"
             ],
             "acceptance_sources": [
-              "SP2/derived/integration-e2e",
-              "SP2/derived/integration-regression",
-              "SP2/constraints/1",
-              "SP2/constraints/2"
+              "SP3/derived/integration-e2e",
+              "SP3/derived/integration-regression",
+              "SP3/constraints/1",
+              "SP3/constraints/2"
             ],
             "kind": "integration",
-            "spec_revision": 5,
-            "spec_hash": "0cb844dd70ebd3811387bd8f2246386b3fa1d1da6d47612f1b946d076f2f1dee"
+            "spec_revision": 3,
+            "spec_hash": "620304404992b29dfc6318fa6acc02552687717d8133b510ff1895787ae52a24"
           },
           {
-            "id": "N18",
-            "type": "agent",
-            "role": "qa",
-            "name": "集成验证",
-            "deps": [
-              "N17"
-            ],
-            "max_retries": 2,
-            "out_schema": "verify-v1",
-            "join": "any"
-          },
-          {
-            "id": "N19",
+            "id": "N12",
             "type": "condition",
             "role": "qa",
-            "name": "合规评分",
+            "name": "质量门判定",
             "deps": [
-              "N18"
+              "N11"
             ],
             "max_retries": 0,
-            "expression": "qa_score >= 90"
+            "expression": "qa_score >= 80"
           },
           {
-            "id": "N20",
+            "id": "N13",
             "type": "agent",
             "role": "qa",
-            "name": "合规复核",
+            "name": "回归测试",
             "deps": [
-              "N19"
+              "N12"
             ],
             "max_retries": 2,
-            "out_schema": "scan-v1"
+            "out_schema": "test-v1"
           },
           {
-            "id": "N21",
+            "id": "N14",
             "type": "agent",
             "role": "coder",
-            "name": "合规整改",
+            "name": "针对性修复与重构",
             "deps": [
-              "N19"
+              "N12"
             ],
             "max_retries": 2,
             "out_schema": "code-result-v1"
           },
           {
-            "id": "N22",
+            "id": "N15",
             "type": "agent",
             "role": "qa",
-            "name": "评审结论汇总",
+            "name": "合并验证",
             "deps": [
-              "N20",
-              "N21"
+              "N13",
+              "N14"
             ],
             "max_retries": 2,
             "out_schema": "verify-v1",
             "join": "any"
           },
           {
-            "id": "N23",
+            "id": "N16",
             "type": "agent",
             "role": "qa",
             "name": "安全与合规评审",
             "deps": [
-              "N22"
+              "N15"
             ],
             "max_retries": 2,
             "out_schema": "scan-v1"
           },
           {
-            "id": "N24",
+            "id": "N17",
             "type": "approval",
             "role": "human",
-            "name": "合规负责人审批",
+            "name": "上线审批",
             "deps": [
-              "N23"
+              "N16"
             ],
             "max_retries": 0
           },
           {
-            "id": "N25",
-            "type": "approval",
-            "role": "human",
-            "name": "上线发布确认",
-            "deps": [
-              "N24"
-            ],
-            "max_retries": 0
-          },
-          {
-            "id": "N26",
+            "id": "N18",
             "type": "end",
             "role": "system",
-            "name": "归档交付",
+            "name": "交付完成",
             "deps": [
-              "N25"
+              "N17"
             ],
             "max_retries": 0
           }
@@ -1220,11 +855,11 @@
             "target": "N7"
           },
           {
-            "source": "N7",
+            "source": "N4",
             "target": "N8"
           },
           {
-            "source": "N5",
+            "source": "N8",
             "target": "N9"
           },
           {
@@ -1232,20 +867,30 @@
             "target": "N10"
           },
           {
+            "source": "N7",
+            "target": "N11"
+          },
+          {
             "source": "N10",
             "target": "N11"
           },
           {
-            "source": "N5",
+            "source": "N11",
             "target": "N12"
           },
           {
             "source": "N12",
-            "target": "N13"
+            "target": "N13",
+            "label": "true"
           },
           {
-            "source": "N5",
-            "target": "N14"
+            "source": "N12",
+            "target": "N14",
+            "label": "false"
+          },
+          {
+            "source": "N13",
+            "target": "N15"
           },
           {
             "source": "N14",
@@ -1256,68 +901,18 @@
             "target": "N16"
           },
           {
-            "source": "N8",
-            "target": "N17"
-          },
-          {
-            "source": "N11",
-            "target": "N17"
-          },
-          {
-            "source": "N13",
-            "target": "N17"
-          },
-          {
             "source": "N16",
             "target": "N17"
           },
           {
             "source": "N17",
             "target": "N18"
-          },
-          {
-            "source": "N18",
-            "target": "N19"
-          },
-          {
-            "source": "N19",
-            "target": "N20",
-            "label": "true"
-          },
-          {
-            "source": "N19",
-            "target": "N21",
-            "label": "false"
-          },
-          {
-            "source": "N20",
-            "target": "N22"
-          },
-          {
-            "source": "N21",
-            "target": "N22"
-          },
-          {
-            "source": "N22",
-            "target": "N23"
-          },
-          {
-            "source": "N23",
-            "target": "N24"
-          },
-          {
-            "source": "N24",
-            "target": "N25"
-          },
-          {
-            "source": "N25",
-            "target": "N26"
           }
         ]
       },
       "base_version": "v1",
       "dirty": false,
-      "updated_at": "2026-11-24T09:21:34"
+      "updated_at": "2026-11-24T09:45:20"
     }
   }
 }

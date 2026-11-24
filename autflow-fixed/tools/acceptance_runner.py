@@ -90,7 +90,8 @@ def collect_environment():
     }
     try:
         env["node"] = subprocess.check_output(
-            ["node", "--version"], text=True, stderr=subprocess.STDOUT).strip()
+            ["node", "--version"], text=True, encoding="utf-8", errors="replace",
+            stderr=subprocess.STDOUT).strip()
     except Exception as exc:
         env["node"] = "unavailable: %s" % exc
     if "com.docker" in platform.platform().lower() or os.path.exists("/.dockerenv"):
@@ -108,7 +109,7 @@ def suite_definitions():
             "title": "Python 语法编译",
             "command": [py, "-m", "py_compile", "server.py", "tools/acceptance_runner.py",
                         "tools/e2e_acceptance.py", "tools/recovery_test.py",
-                        "tools/executor_test.py"],
+                        "tools/executor_test.py", "tools/agent_async_test.py"],
             "server": False,
         },
         {
@@ -179,6 +180,12 @@ def suite_definitions():
             "server": True,
         },
         {
+            "name": "agent_async_test",
+            "title": "B · 慢执行器不阻塞接口与调度",
+            "command": [py, "tools/agent_async_test.py"],
+            "server": False,
+        },
+        {
             "name": "fe_test",
             "title": "前端交互联调（DOM 桩）",
             "command": ["node", "tools/fe_test.js"],
@@ -189,6 +196,14 @@ def suite_definitions():
             "title": "B · 运行中崩溃与重启恢复",
             "command": [py, "tools/recovery_test.py"],
             "server": False,
+        },
+        {
+            "name": "spec_preview_e2e",
+            "title": "C · 真实浏览器：分解预览覆盖画布与取消还原",
+            "command": ["node", "tools/spec_preview_e2e.js"],
+            "server": True,
+            "with_artifacts": True,
+            "browser": True,
         },
         {
             "name": "browser_e2e",
@@ -222,6 +237,9 @@ def run_suite(spec, out_dir, timeout, skip_browser):
     started = time.time()
     env = dict(os.environ)
     env["PYTHONPYCACHEPREFIX"] = os.path.join(tempfile.gettempdir(), "autflow-pycache")
+    # 服务端 stdout 重定向到文件时是块缓冲的，进程被 kill 后日志全丢；
+    # 关掉缓冲才能留下崩溃前的最后一行，验收报告才有现场可查。
+    env["PYTHONUNBUFFERED"] = "1"
     try:
         if spec["server"]:
             data_dir = tempfile.mkdtemp(prefix="autflow_accept_%s_" % spec["name"])
@@ -233,7 +251,8 @@ def run_suite(spec, out_dir, timeout, skip_browser):
                 server_proc = subprocess.Popen(
                     [sys.executable, SERVER, "--host", "127.0.0.1", "--port", str(port)],
                     cwd=ROOT, env=env, stdout=log_stream,
-                    stderr=subprocess.STDOUT, text=True)
+                    stderr=subprocess.STDOUT, text=True,
+                    encoding="utf-8", errors="replace")
                 wait_health(base, server_proc)
                 command.append(base)
                 if spec.get("with_artifacts"):
@@ -243,7 +262,8 @@ def run_suite(spec, out_dir, timeout, skip_browser):
 
         proc = subprocess.run(
             command, cwd=ROOT, env=env, stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT, text=True, timeout=timeout)
+            stderr=subprocess.STDOUT, text=True,
+            encoding="utf-8", errors="replace", timeout=timeout)
         output = proc.stdout or ""
         status = "PASS" if proc.returncode == 0 else "FAIL"
         reason = "" if proc.returncode == 0 else "退出码 %d" % proc.returncode

@@ -437,6 +437,13 @@ table.att td{padding:3px 5px; color:#475569; border-bottom:1px solid #f1f5f9}
 }
 .spec-bar{display:flex; align-items:center; gap:8px; margin-bottom:4px}
 .spec-bar .select{max-width:240px; flex:1}
+/* 规格面板的模板选择：整行宽，说明文字跟在下面，避免"选完不知道差别在哪" */
+.select.wide{width:100%; max-width:none}
+.tpl-desc{
+  margin-top:6px; padding:7px 9px; border-radius:8px; background:#f1f5f9;
+  border:1px solid var(--line); font-size:11px; line-height:1.55; color:#64748b;
+}
+.tpl-desc:empty{display:none}
 .label-sm{display:block; font-size:11.5px; color:#475569; font-weight:600; margin:12px 0 5px}
 .hint-inline{font-weight:400; color:#94a3b8; margin-left:2px}
 .field{

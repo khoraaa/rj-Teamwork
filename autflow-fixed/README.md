@@ -1,4 +1,4 @@
-# AutoFlow · 编排器执行可视化原型
+﻿# AutoFlow · 编排器执行可视化原型
 
 对应《第十二组\_Workflow平台技术设计与执行可视化说明书》第 3、4 章与《需求分析与确认报告》FR-01～FR-08，并补充需求生成和运行历史演示能力。
 目标是把"需求 → 任务 DAG → 编排器调度 → 执行可视化 → 人工干预 → 历史回看"这条原型主链路跑通并可现场演示。
@@ -56,9 +56,10 @@ python server.py --port 8010
 点工作流栏的 **设计规格**（或点工作流栏左侧的「规格：…」文字）打开规格面板：
 
 1. **写规格**：填写规格名称、一句话摘要、正文，再加若干**模块**（每个模块有稳定 ID、优先级 P0/P1/P2、目标、若干条验收条款）和若干**全局约束**。规格存在 `data/specs.json`，可多份并存、随时切换；每次保存递增 `revision` 并生成内容哈希。
-2. **分解预览**：点「分解预览」，PM Agent 按模块拆出 `tasks[]`——每条任务带 ID、标题、角色、依赖、人日、验收标准、逐条规格出处（如 `SP1/M2/acceptance/1`）、规格版本和任务级 `out_schema`。这一步只读，不动草稿。
-3. **分解并编排**：点「分解并编排」，把任务清单按当前模板编排成 DAG 并落库为当前草稿，画布立刻显示。任务之间的 `depends_on` 变成边，没有上游依赖的任务挂到流程主干上。
-4. **看分解质量**：点画布上的「需求分析与拆分」（PM 节点），右栏直接显示任务状态、验收标准和规格出处；点某个任务节点，右栏「任务信息」显示任务号、规格版本、优先级、预估人日与逐条验收证据；点清单里的行会跳到对应节点。PM 节点的 `prd-v1` 产物同样保留完整 `tasks[]`。
+2. **选流程模板**：面板顶部的「流程模板」下拉直接选这次按哪套流程编排——**标准 SE 流程**（需求 → 分析拆分 → 架构 → 并行实现 → 质量门 → 回归 → 合并 → 高风险时安全评审 → 审批 → 交付）、**敏捷精简流程**（无质量门与评审，适合小步验证）、**企业合规交付流程**（测试计划先行、串行交付、合规评分与复核、合规负责人审批、归档）。下拉下方直接摊开所选模板的阶段说明，不用去翻文档；同一份规格换模板，预览的结构会立刻重画（同一张规格实测：标准 SE 16 节点 / 企业合规 19 节点 / 敏捷精简 12 节点）。
+3. **分解预览**：点「分解预览」，PM Agent 按模块拆出 `tasks[]`——每条任务带 ID、标题、角色、依赖、人日、验收标准、逐条规格出处（如 `SP1/M2/acceptance/1`）、规格版本和任务级 `out_schema`；**同时把编排出来的流程图直接画在画布上，覆盖原来的图**（节点全部显示为待运行）。预览走 `POST /api/specs/{id}/preview`，服务器不落库、草稿和已发布版本都不动，所以这一步可以随便点：按钮会变成「取消分解预览」，再点一次、关闭面板、切换规格或直接退出，画布都会回到之前那张图。
+4. **分解并编排**：点「就按这个编排」（未预览时是「分解并编排」），把任务清单按**面板里选中的模板**编排成 DAG 并落库为当前草稿，画布立刻显示。任务之间的 `depends_on` 变成边，没有上游依赖的任务挂到流程主干上。
+5. **看分解质量**：点画布上的「需求分析与拆分」（PM 节点），右栏直接显示任务状态、验收标准和规格出处；点某个任务节点，右栏「任务信息」显示任务号、规格版本、优先级、预估人日与逐条验收证据；点清单里的行会跳到对应节点。PM 节点的 `prd-v1` 产物同样保留完整 `tasks[]`。
 
 三层数据关系：`设计规格 spec → 任务清单 tasks[] → DAG 定义`，只有最下层是流程图。**任务清单是数据与视图，不是额外的节点**——不做事的东西不该出现在 DAG 里。
 
@@ -162,6 +163,9 @@ Run ID、版本、开始时间、用时、节点数、事件数、人工操作�
 * **错误分类**：`E-TIMEOUT`、`E-FORMAT`、`E-COMPILE`、`E-REVIEW`、`E-NETWORK` 为可重试错误，会自动重试；
   `E-AGENT`、`E-INTERRUPT` 为不可重试错误，**不消耗重试次数**，直接转 `WAITING_HUMAN`。
 * **超时**：节点超时归入 `E-TIMEOUT`（可重试）；持续超时耗尽 `max_retries` 后转人工，下游阻断。
+* **执行不占引擎锁**：`agent.run()` 在线程池里执行，调度线程只做状态迁移。一次慢的模型请求
+  不会阻塞 `/api/state`、SSE 和保存草稿；真实耗时超过节点 `timeout` 时由调度侧判定为 `E-TIMEOUT`，
+  迟到的结果按执行令牌丢弃，不会把已经超时的节点又改回成功（`agent_async_test.py` 用 2 秒慢端点验证）。
 * **重试**：`retry_count` / `attempts` 记录每次尝试与错误码；单次失败自动重试，超限转人工，人工可 `retry` / `skip`。
 * **取消**：运行中 `cancel` 立即收敛在途任务，运行进入 `CANCELLED` 并归档历史。
 * **分支 / 汇聚**：条件节点按 `true` / `false` 出边选择下游（未命中为 `SKIPPED`）；`join` 策略决定多入边汇聚时机。
@@ -204,7 +208,7 @@ python tools/acceptance_runner.py
 * `*.log`：完整命令输出和服务端日志；
 * `browser_e2e-artifacts/`：网络错误、需求生成、编辑校验、审批成功、历史回看截图。
 
-机器需有 Node.js 22+，真实浏览器套件还需 Chrome / Chromium。也可使用随附的一次性容器环境，
+机器需有 Node.js 22+，真实浏览器套件还需 Chrome / Chromium（环境变量 `CHROME_PATH` 可指向任意 Chromium 内核，例如 Windows 自带的 Edge：`set CHROME_PATH=C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`）。也可使用随附的一次性容器环境，
 其中已经包含 Python、Node、Chromium 和 Noto CJK 字体：
 
 ```bash
@@ -220,7 +224,7 @@ node tools/browser_e2e.js
 ```
 
 浏览器套件会实际注入网络中断，确认红色故障条出现、恢复后可继续操作；不会再依赖 Node DOM 桩
-推断页面行为。全量验收现为 15 个套件；新增套件覆盖规格稳定引用、PM 完整任务契约、
+推断页面行为。全量验收现为 17 个套件；新增套件覆盖规格稳定引用、PM 完整任务契约、
 任务级 schema 以及任务清单与 DAG 的一致性。
 
 \---
@@ -329,6 +333,7 @@ python tools/demo_matrix.py
 |POST|`/api/specs`|新建规格（`name` / `summary` / `body` / `modules[]` / `constraints[]`）|
 |PUT|`/api/specs/{id}`|修改规格（保留 `created_at`，刷新 `updated_at`）|
 |POST|`/api/specs/{id}/decompose`|规格 → 任务清单 `tasks[]`（只读，不落库）|
+|POST|`/api/specs/{id}/preview`|规格 → 任务清单 → DAG 预演（只读，**不落库**），返回 `definition` / `tasks` / `graph`，供「分解预览」直接画在画布上|
 |POST|`/api/specs/{id}/plan`|规格 → 任务清单 → DAG，并落库为当前草稿（`{"template":"default"}`），返回 `draft` / `tasks` / `trace` / `stats`|
 |GET|`/api/runs`|运行历史列表（最近 20 条摘要）|
 |GET|`/api/runs/{run_id}`|单次运行详情（定义快照 + 节点 + 事件），供历史回看|
@@ -346,18 +351,20 @@ python tools/demo_matrix.py
 
 | 脚本 | 覆盖 | 断言数 |
 |-|-|-|
-| `python tools/acceptance_runner.py` | 隔离式全量验收编排、环境记录、日志与报告 | 15 套件 |
-| `python tools/spec_task_test.py` | 规格稳定 ID/版本、PM 任务契约、任务级 schema、清单与 DAG 一致性、编排 API | 22 |
+| `python tools/acceptance_runner.py` | 隔离式全量验收编排、环境记录、日志与报告 | 16 套件 |
+| `python tools/spec_task_test.py` | 规格稳定 ID/版本、PM 任务契约、任务级 schema、清单与 DAG 一致性、预览只读性、模板差异、编排 API | 34 |
 | `python tools/e2e_acceptance.py` | 需求生成、编辑、校验、发布、运行、SSE 续接、审批打回/重试、历史 | 47 |
 | `node tools/browser_e2e.js` | Chromium 真实点击、错误提示、画布编辑、审批和历史截图 | 21 |
+| `node tools/spec_preview_e2e.js` | 真实浏览器：分解预览覆盖画布 / 换模板重画 / 取消还原 / 新建规格取消 | 30 |
 | `python tools/smoke_test.py` | 端到端主链路 | 全部通过 |
 | `python tools/scenario_test.py` | 分支 / 审批打回 / 暂停 / 校验 / 重试耗尽 | 29 |
 | `python tools/editor_test.py` | 草稿保存、校验拒绝、发布、按版本运行、运行期隔离 | 21 |
 | `python tools/graph_edit_test.py` | 结构改图后跑通（删节点 / 插节点 / 改连线）+ 单分支拦截 | 14 |
 | `python tools/generate_test.py` | 需求生成 + 编辑/发布/启动 + 人工审批 + 历史归档 | 43 |
 | `python tools/executor_test.py` | 可替换执行器 / 超时重试 / 持续超时转人工 / 错误分类 / 取消 | 22 |
+| `python tools/agent_async_test.py` | 慢执行器不阻塞接口与调度（异步执行 / 超时 / 取消） | 14 |
 | `python tools/recovery_test.py` | 运行中杀进程 → 重启恢复（RECONCILING / UNCERTAIN）→ 核对后跑完归档 | 14 |
-| `node tools/fe_test.js` | 前端交互逻辑（编辑、连线、选中删除、需求生成、历史回看、断线提示、SSE 补丁） | 74 |
+| `node tools/fe_test.js` | 前端交互逻辑（编辑、连线、选中删除、需求生成、历史回看、分解预览与撤销、新建规格取消、断线提示、SSE 补丁） | 97 |
 | `python tools/check_ui.py` | DOM 引用一致性与画布布局比例 | 检查项 |
 
 \---
@@ -495,6 +502,7 @@ autflow/
    ├─ recovery_test.py    运行中重启恢复（RECONCILING/UNCERTAIN）
    ├─ e2e_acceptance.py   C 任务完整 API 链路
    ├─ browser_e2e.js      C 任务真实 Chromium 验收与截图
+├─ spec_preview_e2e.js 真实浏览器：分解预览覆盖/还原、取消新建
    ├─ acceptance_runner.py 隔离数据/动态端口的全量验收编排
    ├─ Dockerfile.acceptance 可重复的 Python + Node + Chromium 验收环境
    ├─ fe_test.js          前端交互逻辑冒烟（Node + 最小 DOM 桩）

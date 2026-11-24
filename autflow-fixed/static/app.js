@@ -45,7 +45,10 @@ const app = {
   runWorkflow: null,       // 运行中快照所绑定的定义
   frozen: false, histId: null,   // 历史回看：冻结实时刷新
   def: null, defKey: '', dirty: false, errors: [],
-  specs: [], specId: null, specModules: [], tasks: []   // 设计规格 → 任务清单
+  specs: [], specId: null, specModules: [], tasks: [],   // 设计规格 → 任务清单
+  specTemplate: null,      // 规格面板选中的流程模板（标准 SE / 敏捷精简 / 企业合规）
+  // 分解预览：把"规格编排出来的图"临时画在画布上（只读、不落库），退出即还原
+  preview: null, previewMode: 'view', specNewFrom: null
 };
 
 /* ------------------------------------------------------------------ utils */
@@ -319,11 +322,21 @@ function render() {
 
 function isEditable() {
   return app.mode === 'edit' && app.viewVersion === 'draft' &&
-         (!app.run.status || app.run.status === 'IDLE');
+         (!app.run.status || app.run.status === 'IDLE') && !app.preview;
 }
 
-/* 决定画布显示哪份定义：运行中看运行版本，空闲时看草稿或所选版本 */
+function isPreviewing() { return !!app.preview; }
+
+/* 决定画布显示哪份定义：预览 > 运行版本 > 草稿/所选版本 */
 function syncCanvas() {
+  if (app.preview) {
+    // 预览期间画布只认预演出来的那份定义，不跟随草稿或运行快照
+    app.def = app.preview.definition;
+    app.wf = app.preview.definition;
+    const pkey = defKey(app.def);
+    if (pkey !== app.defKey) { app.defKey = pkey; buildGraph(app.def); }
+    return;
+  }
   const running = app.run.status && app.run.status !== 'IDLE';
   let def = null;
   if (running && app.runWorkflow) def = app.runWorkflow;
@@ -346,12 +359,13 @@ function renderTopbar() {
   $('#wfVer').textContent = (app.def && app.def.version) || '—';
 
   const active = ['RUNNING', 'PAUSED', 'WAITING_HUMAN', 'RECONCILING'].includes(s);
-  $('#btnStart').disabled = active || app.frozen;
+  $('#btnStart').disabled = active || app.frozen || isPreviewing();
   $('#btnStart').textContent = ['IDLE'].includes(s) ? '启动运行' : '重新运行';
-  $('#btnPause').disabled = !['RUNNING', 'PAUSED', 'RECONCILING'].includes(s) || app.frozen;
+  $('#btnPause').disabled =
+    !['RUNNING', 'PAUSED', 'RECONCILING'].includes(s) || app.frozen || isPreviewing();
   $('#btnPause').textContent = (s === 'PAUSED' || s === 'RECONCILING') ? '继续' : '暂停';
-  $('#btnReset').disabled = s === 'IDLE' || app.frozen;
-  $('#btnValidate').disabled = !!app.frozen;
+  $('#btnReset').disabled = s === 'IDLE' || app.frozen || isPreviewing();
+  $('#btnValidate').disabled = !!app.frozen || isPreviewing();
   $('#tglDemo').checked = !!app.run.demo;
   $('#tglFail').checked = app.run.fail_mode === 'persistent';
   $('#selSpeed').value = String(app.run.speed || 1);
@@ -359,17 +373,20 @@ function renderTopbar() {
 
 function renderWfBar() {
   const e = app.editor;
-  const draftName = e && e.draft && e.draft.definition
-    ? (e.draft.definition.name || '')
-    : '';
+  const pv = app.preview;
   $('#wfName').textContent = app.frozen
     ? ((app.run.workflow_name || '—') + ' · 历史回看')
-    : (draftName || (e ? e.name : '—'));
+    : (pv ? '预览 · ' + (pv.definition.name || '未命名')
+          : (e ? e.name : '—'));
   const chip = $('#wfState');
   const runStatus = app.run.status || 'IDLE';
   const active = ['RUNNING', 'PAUSED', 'WAITING_HUMAN', 'RECONCILING'].includes(runStatus);
   const hasRun = runStatus !== 'IDLE';
-  if (app.frozen) {
+  if (pv) {
+    // 预览不是草稿、也不是已发布版本：必须显式标出来，否则用户会以为图已经保存了
+    chip.textContent = '预览 · 未保存';
+    chip.dataset.tone = 'draft';
+  } else if (app.frozen) {
     chip.textContent = '历史 · ' + (app.run.workflow_version || '—');
     chip.dataset.tone = 'pub';
   } else if (runStatus === 'RECONCILING') {
@@ -392,18 +409,23 @@ function renderWfBar() {
   }
   // 当前草稿由哪个流程模板生成（换模板 = 换能力域词典与阶段编排）
   const tplChip = $('#wfTemplate');
-  const curTpl = (e && e.draft && e.draft.definition && e.draft.definition.template) || '';
+  const curTpl = pv ? (pv.definition.template || '')
+    : ((e && e.draft && e.draft.definition && e.draft.definition.template) || '');
   const tplMeta = (app.templates || []).find(t => t.id === curTpl);
   tplChip.hidden = !curTpl;
   tplChip.textContent = curTpl ? ('模板 · ' + (tplMeta ? tplMeta.name : curTpl)) : '';
   tplChip.title = (tplMeta && tplMeta.description) || '生成该草稿所用的流程模板';
   const req = app.frozen ? (app.run.requirement || '')
                          : ((e && e.requirement) || '');
-  // 顶栏只显示"这份草稿从哪来"：规格编排 → 显示规格名；一句话生成 → 显示需求摘要
+  // 顶栏只显示"画布上这份定义从哪来"：预览 → 规格名 + 未保存；草稿 → 规格名或需求摘要
   const lbl = $('#reqLabel');
-  const specId = (e && e.draft && e.draft.definition && e.draft.definition.spec_id) || '';
+  const specId = pv ? (pv.spec && pv.spec.id)
+    : ((e && e.draft && e.draft.definition && e.draft.definition.spec_id) || '');
   const specMeta = (app.specs || []).find(s => s.id === specId);
-  if (specId) {
+  if (pv) {
+    lbl.textContent = '规格：' + truncate((pv.spec && pv.spec.name) || specId, 30) + ' · 预览中';
+    lbl.title = '画布上是分解预览的结果，尚未保存为草稿；点「取消分解预览」回到原来的图';
+  } else if (specId) {
     const plannedRev = (e && e.draft && e.draft.definition && e.draft.definition.spec_revision) || null;
     const stale = !!(specMeta && plannedRev && specMeta.revision && specMeta.revision !== plannedRev);
     lbl.textContent = '规格：' + truncate(specMeta ? specMeta.name : specId, 30)
@@ -415,15 +437,16 @@ function renderWfBar() {
     lbl.textContent = '需求：' + (req ? truncate(req, 34) : '尚未填写，点此设计规格');
     lbl.title = req || '点击填写设计规格，或点「快速生成」用一句话需求';
   }
-  $('#wfDirty').hidden = !app.dirty || app.frozen;
+  $('#wfDirty').hidden = !app.dirty || app.frozen || !!pv;
   $('#wfErr').textContent = (app.errors && app.errors[0] && app.errors[0].msg) || '';
-  $('#tglEdit').checked = app.mode === 'edit';
-  $('#tglEdit').disabled = hasRun || app.frozen;
-  $('#btnSave').disabled = !app.dirty || app.frozen;
-  $('#btnPublish').disabled = !(app.mode === 'edit') || hasRun || app.frozen;
+  $('#tglEdit').checked = app.mode === 'edit' && !pv;
+  $('#tglEdit').disabled = hasRun || app.frozen || !!pv;
+  $('#btnSave').disabled = !app.dirty || app.frozen || !!pv;
+  $('#btnPublish').disabled = !(app.mode === 'edit') || hasRun || app.frozen || !!pv;
   $('#btnReq').disabled = app.frozen;
-  $('#paletteBlock').hidden = app.mode !== 'edit' || app.frozen;
+  $('#paletteBlock').hidden = app.mode !== 'edit' || app.frozen || !!pv;
   renderVersionSelect();
+  syncSpecButtons();
 }
 
 function renderVersionSelect() {
@@ -438,7 +461,7 @@ function renderVersionSelect() {
         `<option value="${v.version}">${v.version} · ${esc((v.note || '').slice(0, 12))}</option>`).join('');
     sel.value = app.viewVersion;
   }
-  sel.disabled = app.run.status && app.run.status !== 'IDLE';
+  sel.disabled = (app.run.status && app.run.status !== 'IDLE') || isPreviewing();
 }
 
 function renderNodes() {
@@ -889,6 +912,11 @@ function appendEvents(events) {
 /* ----------------------------------------------------------------- state */
 function applySnapshot(s) {
   if (app.frozen) return;          // 历史回看期间不被实时状态覆盖
+  if (app.preview) {               // 预览期间画布是人造的，不接受实时快照改图
+    app.run = Object.assign({}, app.run, (s && s.run) || {});
+    renderTopbar();
+    return;
+  }
   app.roles = s.roles || {};
   if (s.workflow) { app.wf = s.workflow; app.runWorkflow = s.workflow; }
 
@@ -911,6 +939,12 @@ function applySnapshot(s) {
 
 function applyPatch(p) {
   if (app.frozen) return;
+  if (app.preview) {               // 预览期间只同步顶栏时钟，不重绘画布
+    if (p.run) app.run = Object.assign({}, app.run, p.run);
+    if (p.version != null) app.version = p.version;
+    renderTopbar();
+    return;
+  }
   if (p.version != null && app.version === p.version) return;
   app.version = p.version;
 
@@ -958,7 +992,8 @@ async function loadEditor() {
   syncTemplateSelect();
 }
 
-/* 流程模板：后端 templates/*.json 的索引，决定能力域词典与阶段编排 */
+/* 流程模板：后端 templates/*.json 的索引，决定能力域词典与阶段编排。
+   两处入口共用同一份清单：快速生成面板、设计规格面板（选标准 SE / 敏捷精简 / 企业合规）。 */
 async function loadTemplates() {
   const sel = $('#selTemplate');
   const specSel = $('#selSpecTemplate');
@@ -966,29 +1001,60 @@ async function loadTemplates() {
     const r = await getJSON('/api/templates');
     const list = r.templates || [];
     app.templates = list;
-    const options = list.map(t =>
+    const opts = list.map(t =>
       `<option value="${esc(t.id)}" title="${esc(t.description || '')}">${esc(t.name)} · ${t.stages} 阶段</option>`
     ).join('');
-    sel.innerHTML = options;
-    specSel.innerHTML = options;
-    sel.hidden = !list.length;
-    specSel.hidden = !list.length;
+    if (sel) { sel.innerHTML = opts; sel.hidden = !list.length; }
+    if (specSel) { specSel.innerHTML = opts; specSel.hidden = !list.length; }
   } catch (e) {
-    sel.hidden = true; /* 旧服务端没有该接口 */
-    specSel.hidden = true;
+    if (sel) sel.hidden = true;      /* 旧服务端没有该接口 */
+    if (specSel) specSel.hidden = true;
   }
   syncTemplateSelect();
+  syncSpecTemplate();
 }
 
-/* 快速生成与规格编排各有独立模板选择；跟随当前草稿同步默认值。 */
+/* 下拉框跟随"当前草稿是哪个模板生成的" */
 function syncTemplateSelect() {
   const sel = $('#selTemplate');
-  const specSel = $('#selSpecTemplate');
   const e = app.editor;
   const cur = e && e.draft && e.draft.definition && e.draft.definition.template;
-  if (!cur || !(app.templates || []).some(t => t.id === cur)) return;
+  if (!sel || !cur || !(app.templates || []).some(t => t.id === cur)) return;
   sel.value = cur;
-  specSel.value = cur;
+}
+
+/* 规格面板的模板选择：默认跟草稿一致，但用户一旦显式选过就尊重他的选择 */
+function syncSpecTemplate() {
+  const sel = $('#selSpecTemplate');
+  if (!sel) return;
+  const def = app.editor && app.editor.draft && app.editor.draft.definition;
+  const fromDraft = (def && def.template) || 'default';
+  if (!app.specTemplate) app.specTemplate = fromDraft;
+  if ((app.templates || []).some(t => t.id === app.specTemplate) && sel.value !== app.specTemplate) {
+    sel.value = app.specTemplate;
+  }
+  renderSpecTplDesc();
+}
+
+/* 模板说明直接摊在面板里：光看名字分不清"标准 SE"和"企业合规"差在哪 */
+function renderSpecTplDesc() {
+  const box = $('#specTplDesc');
+  if (!box) return;
+  const sel = $('#selSpecTemplate');
+  const id = (sel && sel.value) || app.specTemplate || 'default';
+  const meta = (app.templates || []).find(t => t.id === id);
+  box.textContent = meta
+    ? `${meta.name} · ${meta.stages} 阶段 · 并行上限 ${meta.concurrency_limit || '—'}：${meta.description || ''}`
+    : '';
+}
+
+/* 换模板：预览中就直接按新模板重画，别让人对着上一个模板的图做判断 */
+async function changeSpecTemplate(value) {
+  app.specTemplate = value || 'default';
+  renderSpecTplDesc();
+  if (app.preview) {
+    if (app.specId) await previewSpec();
+  }
 }
 
 /* ------------------------------------------------------------ 编辑操作 */
@@ -1488,6 +1554,8 @@ function bindUI() {
   $('#tglEdit').onchange = (e) => setMode(e.target.checked);
   $('#selVersion').onchange = (e) => switchVersion(e.target.value);
   $('#specSel').onchange = (e) => openSpecById(e.target.value);
+  const specTpl = $('#selSpecTemplate');
+  if (specTpl) specTpl.onchange = (e) => changeSpecTemplate(e.target.value);
   $('#btnZoomIn').onclick = () => zoom(0.82);
   $('#btnZoomOut').onclick = () => zoom(1.22);
   $('#btnFit').onclick = fit;
@@ -1530,9 +1598,61 @@ function openSpec() {
   $('#specPanel').hidden = false;
   $('#reqPanel').hidden = true;
   $('#histPanel').hidden = true;
+  syncSpecTemplate();               // 模板选择器与说明先按当前草稿对好
   if (!app.specs.length) loadSpecs();
+  else syncSpecContext();
 }
-function closeSpec() { $('#specPanel').hidden = true; }
+function closeSpec() {
+  // 关面板 = "直接退出预览"：画布必须回到之前那张图，不能把预览留在屏幕上
+  cancelPreview({ silent: true });
+  $('#specPanel').hidden = true;
+}
+
+/* 面板里的规格和画布上的草稿可能不是同一份：说清楚当前顶栏显示的是谁 */
+function syncSpecContext() {
+  const note = $('#specNote');
+  if (!note) return;
+  if (app.preview) {
+    note.textContent = '预览中 · 画布上是「' + ((app.preview.spec && app.preview.spec.name) || '')
+      + '」的分解结果，尚未保存';
+    return;
+  }
+  const def = app.editor && app.editor.draft && app.editor.draft.definition;
+  const draftSpec = (def && def.spec_id) || '';
+  if (!app.specId) return;
+  if (!draftSpec) {
+    note.textContent = '画布上还不是规格编排出来的图；点「分解预览」可以先看这份规格的流程图';
+  } else if (app.specId !== draftSpec) {
+    const meta = (app.specs || []).find(s => s.id === draftSpec);
+    note.textContent = '画布上仍是「' + truncate(meta ? meta.name : draftSpec, 20)
+      + '」编排的图；点「分解预览」看这份规格生成的流程图';
+  } else {
+    note.textContent = '';
+  }
+}
+
+/* 面板底部按钮随状态变化：预览中，「分解预览」变成「取消分解预览」 */
+function syncSpecButtons() {
+  const d = $('#btnSpecDecompose');
+  if (!d) return;
+  const busy = app.run.status && app.run.status !== 'IDLE';
+  d.textContent = app.preview ? '取消分解预览' : '分解预览';
+  d.classList.toggle('warn', !!app.preview);
+  d.title = app.preview
+    ? '退出预览，画布回到之前那张图'
+    : '把规格拆成任务，并把生成的流程图直接画在画布上（不保存）';
+  d.disabled = !app.preview && !app.specId;
+  const p = $('#btnSpecPlan');
+  if (p) {
+    p.textContent = app.preview ? '就按这个编排' : '分解并编排';
+    p.disabled = busy;
+    p.title = app.preview
+      ? '把预览的这张图保存成草稿（可编辑、可发布）'
+      : '按已保存的规格和当前模板生成 DAG 草稿';
+  }
+  const s = $('#btnSpecSave');
+  if (s) s.disabled = !!app.preview;
+}
 
 async function loadSpecs(selectId) {
   try {
@@ -1552,6 +1672,7 @@ async function loadSpecs(selectId) {
 
 async function openSpecById(id) {
   if (!id) return;
+  if (app.preview) cancelPreview({ silent: true });   // 换规格 = 放弃当前预览
   try {
     const r = await getJSON('/api/specs/' + encodeURIComponent(id));
     renderSpec(r.spec);
@@ -1574,13 +1695,37 @@ function renderSpec(spec) {
   $('#specMeta').textContent = spec.updated_at
     ? `r${spec.revision || 1} · 更新于 ` + spec.updated_at.replace('T', ' ')
     : '新规格（尚未保存）';
-  $('#specNote').textContent = '';
+  // 退出"新建"状态：收起取消按钮、去掉临时占位项
+  const back = $('#btnSpecBack');
+  if (back) back.hidden = true;
+  const ph = document.getElementById('specNewOpt');
+  if (ph) ph.remove();
   clearTasks();
   const sel = $('#specSel');
   if (sel && spec.id) sel.value = spec.id;
+  syncSpecTemplate();
+  syncSpecButtons();
+  syncSpecContext();
+}
+
+/* 从"新建"退回已保存的规格：新建表单本身不该是个没有出口的死胡同 */
+async function backToSavedSpec() {
+  const from = app.specNewFrom;
+  app.specNewFrom = null;
+  app.specId = null;
+  const back = $('#btnSpecBack');
+  if (back) back.hidden = true;
+  if (!(app.specs || []).length) {
+    toast('还没有已保存的规格，填完点「保存规格」即可', true);
+    return;
+  }
+  await loadSpecs(from || undefined);
 }
 
 function newSpec() {
+  if (app.preview) cancelPreview({ silent: true });
+  const sel = $('#specSel');
+  app.specNewFrom = app.specId || (sel && sel.value) || null;
   app.specId = null;
   app.specModules = [{ id: '', name: '', goal: '', priority: 'P0', acceptance: [] }];
   $('#specName').value = '';
@@ -1591,6 +1736,21 @@ function newSpec() {
   $('#specNote').textContent = '';
   clearTasks();
   renderSpecModules();
+  // 下拉框加一个占位项，否则它仍显示上一份规格，看起来像"新建没生效"
+  if (sel) {
+    let opt = document.getElementById('specNewOpt');
+    if (!opt) {
+      opt = document.createElement('option');
+      opt.id = 'specNewOpt';
+      opt.value = '';
+      opt.textContent = '新建规格（未保存）';
+      sel.insertBefore(opt, sel.firstChild);
+    }
+    sel.value = '';
+  }
+  const back = $('#btnSpecBack');
+  if (back) back.hidden = false;
+  syncSpecButtons();
   $('#specName').focus();
 }
 
@@ -1663,10 +1823,10 @@ async function saveSpec() {
       ? await api('/api/specs/' + encodeURIComponent(app.specId), payload, 'PUT')
       : await api('/api/specs', payload);
     if (!r.ok) { note.textContent = r.message || '保存失败'; return; }
-    note.textContent = `已保存 · ${(r.spec.modules || []).length} 个模块 · ${r.spec.id}`;
     clearTasks();
     toast('设计规格已保存');
     await loadSpecs(r.spec.id);
+    note.textContent = `已保存 · ${(r.spec.modules || []).length} 个模块 · ${r.spec.id}`;
     setFoot('规格「' + r.spec.name + '」已保存 · 下一步由 PM Agent 分解成任务');
   } catch (e) {
     note.textContent = '保存失败：' + (e && e.message ? e.message : e);
@@ -1675,22 +1835,95 @@ async function saveSpec() {
   }
 }
 
-/* ---------------- 规格 → 任务清单（PM Agent 分解预览） ---------------- */
+/* ---------------- 规格 → 任务清单 + 流程图预览（PM Agent 分解预览） ----------------
+ * 预览是"只读预演"：调 /preview 拿一份编排好的定义，直接画在画布上覆盖原来的图，
+ * 服务器不落库、草稿和版本都不动，所以取消预览只需要把画布刷回服务端状态。
+ */
 async function decomposeSpec() {
-  if (!app.specId) { toast('先保存规格，再分解', true); return; }
-  const btn = $('#btnSpecDecompose'), note = $('#specNote');
-  btn.disabled = true; btn.textContent = '分解中…';
-  try {
-    const r = await api('/api/specs/' + encodeURIComponent(app.specId) + '/decompose', {});
-    if (!r.ok) { note.textContent = r.message || '分解失败'; return; }
-    renderTasks(r);
-    note.textContent = r.message || '';
-    setFoot(`规格「${r.spec.name}」已拆出 ${r.tasks.length} 条任务`);
-  } catch (e) {
-    note.textContent = '分解失败：' + (e && e.message ? e.message : e);
-  } finally {
-    btn.disabled = false; btn.textContent = '分解预览';
+  if (app.preview) { await cancelPreview(); return; }
+  if (!app.specId) { toast('先保存规格，再预览', true); return; }
+  // 预览会把画布换成预演图、退出时从服务端重建：先确保手上没有未保存的改动
+  if (app.dirty) { toast('画布上有未保存的修改，先保存再预览', true); return; }
+  if (app.run.status && app.run.status !== 'IDLE') {
+    toast('运行进行中，画布在跟随运行状态，稍后再预览', true); return;
   }
+  await previewSpec();
+}
+
+/* 真正去拉一次预演（也用于切换模板后重画） */
+async function previewSpec() {
+  const btn = $('#btnSpecDecompose'), note = $('#specNote');
+  const tplSel = $('#selSpecTemplate');
+  const template = (tplSel && tplSel.value) || app.specTemplate || 'default';
+  btn.disabled = true; btn.textContent = app.preview ? '重新生成…' : '分解中…';
+  try {
+    const r = await api('/api/specs/' + encodeURIComponent(app.specId) + '/preview', { template });
+    if (!r.ok) { note.textContent = r.message || '分解预览失败'; return; }
+    const specName = (r.spec && r.spec.name) || '';
+    const g = r.graph || {};
+    const tplName = ((app.templates || []).find(t => t.id === template) || {}).name || template;
+    startPreview(r);
+    app.specTemplate = template;
+    renderSpecTplDesc();
+    note.textContent = `预览中 · ${r.tasks.length} 条任务 → ${g.nodes || 0} 节点 · ${tplName} · 尚未保存`;
+    setFoot(`预览「${specName}」× ${tplName} · ${g.nodes || 0} 节点 / ${g.edges || 0} 边 · 未保存，可点「取消分解预览」撤回`);
+  } catch (e) {
+    note.textContent = '分解预览失败：' + (e && e.message ? e.message : e);
+  } finally {
+    btn.disabled = false;
+    syncSpecButtons();
+  }
+}
+
+/* 把预演出来的定义接到画布上：节点全部按"待运行"渲染，顶栏标成预览 */
+function startPreview(r) {
+  const def = r.definition;
+  const wasPreviewing = !!app.preview;
+  app.preview = {
+    spec: r.spec || {}, definition: def, tasks: r.tasks || [],
+    trace: r.trace || [], stats: r.stats || {}, template: r.template
+  };
+  app.tasks = r.tasks || [];
+  if (!wasPreviewing) app.previewMode = app.mode;   // 只在首次进入预览时记住原模式（换模板重画不算）
+  app.mode = 'view';               // 预览只读，不允许拖动/编辑
+  app.dirty = false;
+  app.defKey = '';
+  app.selected = null;
+  app.selEdge = null;
+  // 节点全部按"待运行"渲染，同时保留定义里的字段（详情面板要读 out_schema 等）
+  app.nodes = (def.nodes || []).map(n => Object.assign(
+    { status: 'PENDING', message: '预览 · 尚未运行', duration: 0, retry_count: 0,
+      gate: {}, output: null, logs: [], attempts: [], branch_taken: null }, n));
+  app.nodeById = {};
+  app.nodes.forEach(n => app.nodeById[n.id] = n);
+  app.edges = (def.edges || []).map(e => ({
+    source: e.source, target: e.target, label: e.label || '', active: true
+  }));
+  renderTasks({ tasks: r.tasks, stats: r.stats, trace: r.trace });
+  syncSpecButtons();
+  render();
+}
+
+/* 退出预览：画布回到原来的图（草稿或所选版本），任务清单一起收起 */
+async function cancelPreview(opts) {
+  const o = opts || {};
+  if (!app.preview) return false;
+  app.preview = null;
+  app.mode = app.previewMode || 'view';
+  app.defKey = '';
+  app.dirty = false;
+  app.selected = null;
+  app.selEdge = null;
+  clearTasks();
+  syncSpecButtons();
+  try { await refresh(); } catch (e) { /* 离线时保留当前画面 */ }
+  render();                        // 从服务端快照重建 app.nodes / app.edges / app.def
+  if (!o.silent) {
+    setFoot('已取消分解预览 · 画布回到之前那张图');
+    toast('已退出预览，画布已还原');
+  }
+  if ($('#specPanel') && !$('#specPanel').hidden) syncSpecContext();
+  return true;
 }
 
 function renderTasks(r) {
@@ -1726,36 +1959,37 @@ function clearTasks() {
   $('#specTasks').innerHTML = '';
 }
 
-/* 规格 → 任务清单 → DAG 草稿：编排结果直接成为画布上的工作流 */
+/* 规格 → 任务清单 → DAG 草稿：编排结果直接成为画布上的工作流（从预览里的"就按这个编排"进来） */
 async function planSpec() {
   if (!app.specId) { toast('先保存规格，再编排', true); return; }
   const btn = $('#btnSpecPlan'), note = $('#specNote');
   btn.disabled = true; btn.textContent = '编排中…';
   try {
     const tplSel = $('#selSpecTemplate');
+    const template = (tplSel && tplSel.value) || app.specTemplate || 'default';
     const r = await api('/api/specs/' + encodeURIComponent(app.specId) + '/plan',
-                        { template: (tplSel && tplSel.value) || 'default' });
+                        { template });
     if (!r.ok) { note.textContent = r.message || '编排失败'; return; }
+    if (app.preview) {            // 落库成功后预览就变成正式草稿，撤掉预览壳
+      app.preview = null;
+      app.mode = app.previewMode || 'view';
+      app.defKey = '';
+      clearTasks();
+    }
     app.tasks = r.tasks || [];
-    app.mode = 'view';
-    app.viewVersion = 'draft';
-    app.dirty = false;
-    app.errors = [];
-    app.selected = null;
-    app.selEdge = null;
-    app.defKey = '';
-    app.needFit = true;
-    $('#tglEdit').checked = false;
+    app.specTemplate = template;
     await loadEditor();
-    await refresh();
-    render();
     closeSpec();
-    setFoot(`已按规格编排 ${r.tasks.length} 条任务 · ${r.stats.nodes} 节点 / ${r.stats.edges} 边`);
+    await refresh();
+    syncSpecTemplate();
+    setFoot(`已按规格编排 ${r.tasks.length} 条任务 · ${r.stats.nodes} 节点 / ${r.stats.edges} 边 · 模板 ${
+      ((app.templates || []).find(t => t.id === template) || {}).name || template}`);
     toast('已编排成工作流草稿');
   } catch (e) {
     note.textContent = '编排失败：' + (e && e.message ? e.message : e);
   } finally {
-    btn.disabled = false; btn.textContent = '分解并编排';
+    btn.disabled = false;
+    syncSpecButtons();
   }
 }
 

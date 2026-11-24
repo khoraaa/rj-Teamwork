@@ -210,9 +210,15 @@
   </div>
   <div class="panel-body">
     <div class="panel-hint">规格写「要做什么」，模板决定「按什么流程做」。保存后由 PM Agent 分解成任务清单再编排成 DAG。</div>
+
+    <label class="label-sm" for="selSpecTemplate">流程模板 <span class="hint-inline">标准 SE / 敏捷精简 / 企业合规</span></label>
+    <select class="select sm wide" id="selSpecTemplate" title="流程模板：决定阶段编排、质量门、安全与合规评审"></select>
+    <div class="tpl-desc" id="specTplDesc"></div>
+
     <div class="spec-bar">
       <select class="select sm" id="specSel" title="切换要编辑的规格"></select>
-      <button class="btn sm" onclick="newSpec()">新建</button>
+      <button class="btn sm" id="btnSpecNew" onclick="newSpec()">新建</button>
+      <button class="btn sm ghost" id="btnSpecBack" onclick="backToSavedSpec()" title="放弃新建，回到已保存的规格" hidden>取消新建</button>
       <span class="panel-note" id="specMeta"></span>
     </div>
 
@@ -242,7 +248,6 @@
     </div>
   </div>
   <div class="panel-foot">
-    <select class="select sm" id="selSpecTemplate" title="流程模板：决定规格编排后的阶段、质量门和审批形状"></select>
     <button class="btn" id="btnSpecDecompose" onclick="decomposeSpec()">分解预览</button>
     <button class="btn" id="btnSpecPlan" onclick="planSpec()" title="按已保存的规格和当前模板生成 DAG 草稿">分解并编排</button>
     <button class="btn primary" id="btnSpecSave" onclick="saveSpec()">保存规格</button>

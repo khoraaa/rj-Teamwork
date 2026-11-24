@@ -13,6 +13,7 @@ AutoFlow · 多智能体 Workflow 编排平台 —— 原型后端
 """
 
 import argparse
+import concurrent.futures
 import hashlib
 import json
 import os
@@ -1219,7 +1220,13 @@ AGENT_ERR = {
     "E-REVIEW":  {"category": "review",  "label": "评审门",   "retryable": True},
     "E-NETWORK": {"category": "network", "label": "网络/服务", "retryable": True},
     "E-AGENT":   {"category": "agent",   "label": "执行器",   "retryable": False},
+    # 进程崩溃/重启导致在途节点结果未知，只用于 _recover 标记，不走重试
+    "E-INTERRUPT": {"category": "interrupt", "label": "运行中断", "retryable": False},
 }
+
+# Agent 节点未显式声明 timeout 时的兜底时限（秒）。执行在独立线程里进行，
+# 超时由调度循环判定，线程本身无法被杀掉，其迟到结果按 token 丢弃。
+EXEC_TIMEOUT_DEFAULT = 60.0
 
 
 def make_error(code, reason, gate=None):
@@ -1487,6 +1494,13 @@ class Engine:
         self._thread = None
         self._stop = threading.Event()
         self._last_persist = 0.0
+        # Agent 执行在独立线程池里进行：网络调用（LLM）不能占着引擎锁，
+        # 否则一次慢请求就会把 /api/state、SSE 和编辑接口全部堵死。
+        # 工作线程只把结果丢进队列，状态迁移仍然全部发生在调度线程内。
+        self._pool = concurrent.futures.ThreadPoolExecutor(
+            max_workers=8, thread_name_prefix="agent")
+        self._results = queue.Queue()
+        self._exec_seq = 0
         # 运行配置在重启后保留（start/reset 不应丢配置）
         self.cfg = {"speed": 1.0, "demo": True, "qa_mode": "auto", "agent": "mock"}
         self.state_store = RunStateStore(RUN_STATE_PATH)
@@ -1573,13 +1587,26 @@ class Engine:
                 n["message"] = "进程中断，执行结果未知，需人工核对（不自动重复执行）"
                 n["remaining"] = 0.0
                 uncertain.append(n["id"])
+            # 异步执行标记在进程重启后一律作废（没有工作线程可能再回结果）
+            n["executing"] = False
+            n.pop("exec_token", None)
+            n.pop("exec_started", None)
         self.run["recovered"] = True
-        self.run["status"] = "RECONCILING"
+        # 崩溃时流程正卡在人工审批上：没有"结果未知"的节点，就保持原来的等待态，
+        # 不应该把一次正常的审批等待变成需要额外 resume 的"待核对"。
+        if uncertain:
+            self.run["status"] = "RECONCILING"
+        elif status == "WAITING_HUMAN":
+            self.run["status"] = "WAITING_HUMAN"
+        else:
+            self.run["status"] = "RECONCILING"
         if uncertain:
             for nid in uncertain:
                 self._emit("node.uncertain", nid, "进程中断，节点执行结果待核对")
             self._emit("run.recovered", None,
                        "检测到未完成运行，已恢复到核对状态（%d 个节点待核对）" % len(uncertain))
+        elif status == "WAITING_HUMAN":
+            self._emit("run.recovered", None, "检测到等待人工审批的运行，已保持等待态")
         else:
             self._emit("run.recovered", None, "检测到未完成运行，已恢复到核对状态")
         self.persist()
@@ -1725,6 +1752,10 @@ class Engine:
             if self.run["status"] in ("IDLE", "SUCCESS", "FAILED", "CANCELLED"):
                 return False, "当前状态不可取消"
             for nid, n in self.run["nodes"].items():
+                # 取消时清掉异步执行标记，迟到结果会被 token 校验丢弃
+                n["executing"] = False
+                n.pop("exec_token", None)
+                n.pop("exec_started", None)
                 if n["status"] not in TERMINAL and n["status"] != "WAITING_HUMAN":
                     self._set_status(n, "CANCELLED", "运行被取消")
             self.run["status"] = "CANCELLED"
@@ -1787,6 +1818,7 @@ class Engine:
                 self._set_status(n, "SUCCESS", "人工审批通过")
                 self.run["status"] = "RUNNING"
                 self._emit("approval.resolved", node_id, "审批通过，流程继续向交付节点推进")
+                self._ensure_loop()     # 重启后恢复的等待态没有在跑的调度线程
             else:
                 n["gate"]["human"] = "fail"
                 n["message"] = "审批被打回，等待修改后重试"
@@ -1809,6 +1841,7 @@ class Engine:
             # 恢复期的核对流程保持 RECONCILING，直到显式恢复；普通挂起则直接继续
             if self.run["status"] in ("PAUSED", "WAITING_HUMAN"):
                 self.run["status"] = "RUNNING"
+                self._ensure_loop()
             self._emit("node.retry", node_id, "人工触发重跑")
             self.persist()
             self.cond.notify_all()
@@ -1823,6 +1856,7 @@ class Engine:
             self._deactivate_outgoing(node_id)
             if self.run["status"] == "WAITING_HUMAN":
                 self.run["status"] = "RUNNING"
+                self._ensure_loop()
             self.persist()
             self.cond.notify_all()
             return True, "ok"
@@ -1848,6 +1882,11 @@ class Engine:
             return True, "ok"
 
     # ---------------- 主循环 ----------------
+    def _ensure_loop(self):
+        """确保调度线程在跑：从人工等待/暂停恢复时可能已经没有活着的循环了。"""
+        if self._thread is None or not self._thread.is_alive():
+            self._spawn_loop()
+
     def _loop(self, ev):
         last = time.time()
         last_ver = -1
@@ -1860,9 +1899,13 @@ class Engine:
                 if ev.is_set():
                     return
                 if self.run["status"] not in ("RUNNING", "PAUSED", "WAITING_HUMAN"):
+                    self._thread = None      # 明确标记循环已结束，便于 _ensure_loop 重新拉起
                     return
                 if self.run["status"] == "RUNNING":
                     self.run["elapsed"] += dt
+                # 先收执行结果（工作线程已完成的任务），再推进计时与派发
+                self._drain_results()
+                self._check_exec_timeouts()
                 # 在途任务始终继续收敛（暂停只停止派发，见设计文档 3.2）
                 self._advance(dt * self.run["speed"])
                 # 等待人工期间也刷新依赖状态，让下游阻断可见
@@ -1881,12 +1924,15 @@ class Engine:
 
     def _advance(self, dt):
         for n in self.run["nodes"].values():
-            if n["status"] != "RUNNING":
+            if n["status"] != "RUNNING" or n.get("executing"):
                 continue
             n["remaining"] -= dt
             n["duration"] += dt
             if n["remaining"] <= 0:
-                self._finish(n)
+                if n["type"] in ("start", "end", "condition"):
+                    self._finish(n)          # 纯本地判定，仍在调度线程内
+                else:
+                    self._begin_agent(n)     # 交给线程池，锁外执行
 
     def _compute_ready(self):
         for n in sorted(self.run["nodes"].values(), key=lambda x: x["id"]):
@@ -1933,6 +1979,10 @@ class Engine:
             running += 1
 
     def _start_node(self, n):
+        # 新一次尝试：清掉上一轮可能残留的异步执行标记，否则该节点永远不会再被推进
+        n["executing"] = False
+        n.pop("exec_token", None)
+        n.pop("exec_started", None)
         n["attempts"].append({"attempt": len(n["attempts"]) + 1,
                               "started": round(self.run["elapsed"], 2), "result": "running"})
         self.run["stats"]["dispatched"] += 1
@@ -1960,9 +2010,9 @@ class Engine:
 
     # ---------------- 完成与门禁 ----------------
     def _finish(self, n):
+        """start / end / condition 三类节点在调度线程内直接结算。"""
         n["finished_at"] = round(self.run["elapsed"], 2)
         n["attempts"][-1]["ended"] = round(self.run["elapsed"], 2)
-        role = n.get("role")
 
         if n["type"] == "start":
             n["output"] = {"input": self.run.get("requirement") or "为系统实现用户名密码登录",
@@ -1978,15 +2028,93 @@ class Engine:
         if n["type"] == "condition":
             return self._evaluate_condition(n)
 
-        # ---- Agent 节点：通过可替换的 Agent 接口执行 ----
-        fault = self._injected_failure(n)
-        agent = AGENTS.get(self.cfg.get("agent") or "mock", AGENTS["mock"])
-        context = {"node": n, "requirement": self.run.get("requirement", ""),
-                   "timeout": n.get("timeout"), "deps": n.get("deps", []),
-                   "tasks": self.run.get("tasks") or [],
-                   "attempt": len(n.get("attempts") or []), "fault": fault}
-        result = agent.run(n, context)
+        # 其它类型（agent 等）走异步路径；正常不会走到这里
+        return self._begin_agent(n)
 
+    # ---------------- Agent 异步执行 ----------------
+    def _begin_agent(self, n):
+        """把一次 Agent 执行交给线程池，结果由调度线程回收。
+
+        调用方必须持有引擎锁；这里只做快照与提交。真正的 agent.run 在线程池里跑，
+        不占用 self.lock —— 慢的 LLM 请求不会堵住 /api/state、SSE 和编辑接口。
+        """
+        self._exec_seq += 1
+        token = self._exec_seq
+        n["executing"] = True
+        n["exec_token"] = token
+        n["exec_started"] = self.run["elapsed"]
+        ctx = {
+            "node": _clone(n),
+            "requirement": self.run.get("requirement", ""),
+            "timeout": n.get("timeout"),
+            "deps": list(n.get("deps") or []),
+            "tasks": self.run.get("tasks") or [],
+            "attempt": len(n.get("attempts") or []),
+            # 故障注入有副作用（单次模式会自行关闭），每次尝试只求值一次
+            "fault": self._injected_failure(n),
+            "agent": self.cfg.get("agent") or "mock",
+        }
+        self._pool.submit(self._run_agent, n["id"], token, ctx)
+
+    def _run_agent(self, node_id, token, ctx):
+        """线程池工作线程：只执行，不改引擎状态，结果丢进队列。"""
+        try:
+            agent = AGENTS.get(ctx.get("agent") or "mock") or AGENTS["mock"]
+            result = agent.run(ctx["node"], ctx)
+            if not isinstance(result, AgentResult):
+                result = AgentResult.failure(
+                    make_error("E-AGENT", "执行器返回了非法结果类型"))
+        except Exception as exc:                    # 执行器异常不应拖垮调度线程
+            result = AgentResult.failure(
+                make_error("E-AGENT", "执行器异常：%s" % exc))
+        self._results.put((node_id, token, result))
+
+    def _drain_results(self):
+        """调度线程回收结果；过期结果（已取消/超时/重试）按 token 丢弃。"""
+        while True:
+            try:
+                node_id, token, result = self._results.get_nowait()
+            except queue.Empty:
+                return
+            n = self.run["nodes"].get(node_id)
+            if not n or not n.get("executing") or n.get("exec_token") != token:
+                continue
+            n["executing"] = False
+            n.pop("exec_token", None)
+            n.pop("exec_started", None)
+            if n["status"] != "RUNNING":
+                continue
+            n["duration"] = max(n["duration"], round(
+                self.run["elapsed"] - (n.get("started_at") or 0.0), 2))
+            n["finished_at"] = round(self.run["elapsed"], 2)
+            n["attempts"][-1]["ended"] = round(self.run["elapsed"], 2)
+            self._apply_agent_result(n, result)
+
+    def _check_exec_timeouts(self):
+        """按节点 timeout 判超时；线程杀不掉，但迟到结果会因 token 失效被丢弃。"""
+        now = self.run["elapsed"]
+        for n in list(self.run["nodes"].values()):
+            if not n.get("executing"):
+                continue
+            limit = float(n.get("timeout") or EXEC_TIMEOUT_DEFAULT)
+            if now - (n.get("exec_started") or 0.0) <= limit:
+                continue
+            n["executing"] = False
+            n.pop("exec_token", None)
+            n.pop("exec_started", None)
+            n["duration"] = max(n["duration"], round(now - (n.get("started_at") or 0.0), 2))
+            error = make_error("E-TIMEOUT", "节点执行超过 %s 秒时限" % int(limit),
+                               gate={"format": "skip", "compile": "skip", "review": "skip"})
+            n["attempts"][-1]["result"] = "failed"
+            n["attempts"][-1]["error_code"] = "E-TIMEOUT"
+            n["gate"] = dict(error["gate"])
+            self._emit("gate.result", n["id"], "%s 未通过（%s）" % (error["label"], error["code"]))
+            n["logs"].append("✗ 执行超时：超过 %s 秒" % int(limit))
+            self._fail(n, error)
+
+    def _apply_agent_result(self, n, result):
+        """把执行器结果落成节点状态：schema 校验 → 门禁 → 成功/失败迁移。"""
+        role = n.get("role")
         if result.ok:
             passed, why = check_output_schema(n.get("out_schema"), result.output)
             if not passed:
@@ -2410,6 +2538,44 @@ class Handler(BaseHTTPRequestHandler):
                            "spec_revision": definition.get("spec_revision"),
                            "spec_hash": definition.get("spec_hash")})
 
+    def _preview_spec(self, spec_id, body):
+        """只读预演：把规格编排成 DAG 交给前端画在画布上，不写仓库、不动草稿与版本。
+
+        与 _plan_spec 的区别只有一句：**不落库**。所以「分解预览」可以随便点，
+        退出时画布自然回到原来的定义，不需要回滚任何状态。
+        """
+        spec = SPECS.get(spec_id)
+        if not spec:
+            return self._json({"ok": False, "message": "规格不存在"}, 404)
+        if ENGINE.run["status"] not in ("IDLE", "SUCCESS", "FAILED", "CANCELLED"):
+            return self._json({"ok": False,
+                               "message": "运行进行中，画布正在跟随运行状态，稍后再预览"}, 409)
+        result = PM_AGENT.decompose(spec)
+        tasks = result["tasks"]
+        try:
+            definition, meta = plan_from_tasks(spec, tasks,
+                                               body.get("template") or "default")
+        except TemplateError as exc:
+            return self._json({"ok": False, "message": str(exc)}, 400)
+        ok, errors, warnings, stats = validate_workflow(definition)
+        if not ok:
+            return self._json({"ok": False, "message": "预演出的图未通过校验",
+                               "errors": errors}, 500)
+        definition = dict(definition, preview=True, spec_id=spec["id"],
+                          spec_revision=spec.get("revision"))
+        return self._json({
+            "ok": True, "preview": True,
+            "message": "预演：%d 条任务 → %d 个节点 / %d 条边（未保存）"
+                       % (len(tasks), stats["nodes"], stats["edges"]),
+            "spec": {"id": spec["id"], "name": spec["name"],
+                     "revision": spec.get("revision"), "content_hash": spec.get("content_hash")},
+            "definition": definition, "tasks": tasks, "trace": result["trace"],
+            # 任务清单用 compose 的统计（模块/任务/人日/最长链），图规模单独给 graph
+            "stats": result["stats"],
+            "graph": {"nodes": stats["nodes"], "edges": stats["edges"]},
+            "warnings": warnings, "template": meta["template"],
+        })
+
     def _generate(self, body):
         """需求 → 草稿：生成后直接落库为当前草稿，前端随即展示可编辑的 DAG。"""
         text = (body.get("requirement") or "").strip()
@@ -2455,6 +2621,9 @@ class Handler(BaseHTTPRequestHandler):
         if (len(parts) == 4 and parts[0] == "api" and parts[1] == "specs"
                 and parts[3] == "decompose"):
             return self._decompose_spec(parts[2])
+        if (len(parts) == 4 and parts[0] == "api" and parts[1] == "specs"
+                and parts[3] == "preview"):
+            return self._preview_spec(parts[2], body)
         if (len(parts) == 4 and parts[0] == "api" and parts[1] == "specs"
                 and parts[3] == "plan"):
             return self._plan_spec(parts[2], body)
