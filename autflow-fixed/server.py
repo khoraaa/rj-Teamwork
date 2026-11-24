@@ -1362,8 +1362,15 @@ def _llm_prompt(node, context):
     parts = [
         "你在 AutoFlow 工作流中扮演角色「%s」执行节点「%s」。" % (node.get("role"), node.get("name")),
         "原始需求：" + (context.get("requirement") or "（无）"),
-        "请输出与该节点交付物（%s）一致的 JSON 对象，不要输出多余解释。" % node.get("out_schema", "default"),
     ]
+    if context.get("discussion_prompt"):
+        parts.append(context["discussion_prompt"])
+        parts.append('只输出 JSON 对象，格式为 {"message":"你的本轮意见"}。')
+    else:
+        parts.append("请输出与该节点交付物（%s）一致的 JSON 对象，不要输出多余解释。" %
+                     node.get("out_schema", "default"))
+        if context.get("discussion_context"):
+            parts.append("群体讨论结论与过程（应纳入执行）：\n" + context["discussion_context"])
     deps = context.get("deps") or []
     if deps:
         parts.append("上游节点：" + "、".join(deps))
@@ -1538,6 +1545,7 @@ class Engine:
         run.setdefault("status", "IDLE")
         run.setdefault("nodes", {})
         run.setdefault("edges", [])
+        run.setdefault("discussions", [])
         run.setdefault("events", [])
         run.setdefault("seq", 0)
         run.setdefault("elapsed", 0.0)
@@ -1591,6 +1599,10 @@ class Engine:
             n["executing"] = False
             n.pop("exec_token", None)
             n.pop("exec_started", None)
+        for discussion in self.run.get("discussions", []):
+            if discussion.get("status") == "RUNNING":
+                discussion["status"] = "FAILED"
+                discussion["error"] = "服务中断，未完成的讨论不能自动重放"
         self.run["recovered"] = True
         # 崩溃时流程正卡在人工审批上：没有"结果未知"的节点，就保持原来的等待态，
         # 不应该把一次正常的审批等待变成需要额外 resume 的"待核对"。
@@ -1644,6 +1656,7 @@ class Engine:
             "status": "IDLE",
             "nodes": nodes,
             "edges": [dict(e, active=True) for e in wf["edges"]],
+            "discussions": [],
             "events": [],
             "seq": 0,
             "elapsed": 0.0,
@@ -1703,9 +1716,20 @@ class Engine:
         with self.lock:
             if self.run["status"] in ("RUNNING", "PAUSED", "WAITING_HUMAN", "RECONCILING"):
                 return False, "运行已在进行中（如需放弃当前运行请先重置）"
+            previous_discussions = (_clone(self.run.get("discussions") or [])
+                                    if self.run["status"] == "IDLE" else [])
             if definition is not None:
                 self.wf = _clone(definition)     # 运行时冻结版本
             self._new_run()
+            node_names = {n["id"]: n.get("name") for n in self.wf.get("nodes", [])}
+            eligible = [
+                d for d in previous_discussions
+                if d.get("status") == "COMPLETE" and node_names.get(d.get("node_id")) == d.get("topic")
+            ]
+            latest = {}
+            for discussion in eligible:
+                latest[discussion["node_id"]] = discussion
+            self.run["discussions"] = list(latest.values())
             self.run["status"] = "RUNNING"
             self.run["started_at"] = time.time()
             self._emit("run.started", None, "运行已启动 · 工作流版本 " + str(self.wf.get("version")))
@@ -1759,6 +1783,10 @@ class Engine:
                 if n["status"] not in TERMINAL and n["status"] != "WAITING_HUMAN":
                     self._set_status(n, "CANCELLED", "运行被取消")
             self.run["status"] = "CANCELLED"
+            for discussion in self.run.get("discussions", []):
+                if discussion.get("status") == "RUNNING":
+                    discussion["status"] = "FAILED"
+                    discussion["error"] = "工作流运行已取消"
             self.run["finished_at"] = time.time()
             self._emit("run.cancelled", None, "运行已取消，未开始节点不再派发")
             self._stop.set()
@@ -1860,6 +1888,164 @@ class Engine:
             self.persist()
             self.cond.notify_all()
             return True, "ok"
+
+    def _discussion_by_id(self, discussion_id):
+        return next((d for d in self.run.get("discussions", [])
+                     if d.get("id") == discussion_id), None)
+
+    def _add_discussion_message(self, discussion, role, speaker, content, round_no, kind="agent"):
+        msg = {"speaker": speaker, "role": role, "kind": kind, "round": round_no,
+               "content": content, "ts": round(self.run["elapsed"], 2)}
+        discussion["messages"].append(msg)
+        self._emit("discussion.message", discussion.get("node_id"), speaker + "：" + content[:120])
+
+    def _mock_discussion_round(self, discussion, round_no, guidance=""):
+        title = discussion["topic"]
+        if round_no == 1:
+            replies = [
+                ("pm", "产品经理", "先明确「%s」的目标与验收范围，避免任务边界不清。" % title),
+                ("architect", "架构师", "建议沿用上游产物和现有接口约束，先确定实现方案再拆分细节。"),
+                ("qa", "质量工程师", "验收时应覆盖主要成功路径、异常输入和兼容性风险。"),
+            ]
+        else:
+            guide = guidance[:120]
+            replies = [
+                ("pm", "产品经理", "根据你的引导「%s」，我会相应收紧「%s」的范围和验收重点。" % (guide, title)),
+                ("architect", "架构师", "方案会遵循「%s」，优先复用现有模块，避免额外复杂度。" % guide),
+                ("qa", "质量工程师", "我会把「%s」纳入验收检查，并验证相关边界场景。" % guide),
+            ]
+        for role, speaker, content in replies:
+            self._add_discussion_message(discussion, role, speaker, content, round_no)
+        if round_no == 1:
+            discussion["status"] = "WAITING_GUIDANCE"
+        else:
+            discussion["status"] = "COMPLETE"
+            discussion["conclusion"] = "围绕「%s」协作推进；已纳入人工意见：「%s」" % (
+                title, guidance[:160])
+            self._emit("discussion.completed", discussion.get("node_id"), "讨论已形成结论")
+
+    def _run_llm_discussion_round(self, discussion_id, round_no):
+        participants = [("pm", "产品经理"), ("architect", "架构师"), ("qa", "质量工程师")]
+        if round_no == 2:
+            participants.append(("moderator", "讨论主持人"))
+        for role, speaker in participants:
+            with self.lock:
+                discussion = self._discussion_by_id(discussion_id)
+                if not discussion or discussion.get("status") != "RUNNING":
+                    return
+                node = self.run["nodes"].get(discussion.get("node_id")) or {}
+                transcript = "\n".join(
+                    "%s：%s" % (m["speaker"], m["content"])
+                    for m in discussion.get("messages", [])[-12:])
+                prompt = (
+                    "讨论议题：%s\n当前轮次：%d\n已有讨论：\n%s\n"
+                    "请结合前文，以你的角色提出有实质内容、简洁的本轮意见。"
+                    % (discussion["topic"], round_no, transcript or "（首轮讨论）")
+                )
+                if role == "moderator":
+                    prompt += "\n请总结共识、采纳的人工约束和最终建议，作为本场讨论结论。"
+                ctx = {"requirement": self.run.get("requirement", ""),
+                       "discussion_prompt": prompt, "attempt": round_no}
+                llm_node = {"name": "群体讨论 · " + speaker, "role": role,
+                            "out_schema": "discussion-turn-v1", "timeout": 60}
+            try:
+                result = AGENTS["llm"].run(llm_node, ctx)
+                if not result.ok:
+                    error = (result.error or {}).get("reason") or "模型未能生成讨论发言"
+                    raise RuntimeError(error)
+                content = result.output.get("message") or result.output.get("response")
+                if not isinstance(content, str) or not content.strip():
+                    raise RuntimeError("模型回复缺少 message 字段")
+            except Exception as exc:
+                with self.lock:
+                    discussion = self._discussion_by_id(discussion_id)
+                    if discussion and discussion.get("status") == "RUNNING":
+                        discussion["status"] = "FAILED"
+                        discussion["error"] = str(exc)
+                        self._emit("discussion.failed", discussion.get("node_id"),
+                                   "模型讨论失败：" + str(exc)[:120])
+                        self.persist()
+                        self.cond.notify_all()
+                return
+            with self.lock:
+                discussion = self._discussion_by_id(discussion_id)
+                if not discussion or discussion.get("status") != "RUNNING":
+                    return
+                self._add_discussion_message(discussion, role, speaker, content.strip(), round_no)
+                self.persist()
+                self.cond.notify_all()
+        with self.lock:
+            discussion = self._discussion_by_id(discussion_id)
+            if not discussion or discussion.get("status") != "RUNNING":
+                return
+            if round_no == 1:
+                discussion["status"] = "WAITING_GUIDANCE"
+            else:
+                guidance = next((m["content"] for m in reversed(discussion["messages"])
+                                 if m.get("kind") == "human"), "")
+                discussion["status"] = "COMPLETE"
+                conclusion = next((m["content"] for m in reversed(discussion["messages"])
+                                   if m.get("speaker") == "讨论主持人" and m.get("round") == 2), "")
+                discussion["conclusion"] = conclusion or (
+                    "多角色讨论已完成，并已纳入人工意见：「%s」" % guidance[:160])
+                self._emit("discussion.completed", discussion.get("node_id"), "讨论已形成结论")
+            self.persist()
+            self.cond.notify_all()
+
+    def start_discussion(self, node_id, mode="mock"):
+        with self.lock:
+            node = self.run["nodes"].get(node_id)
+            if not node or node.get("type") != "agent":
+                return False, "只能为 Agent 任务发起讨论", None
+            if mode not in ("mock", "llm"):
+                return False, "未知讨论模式", None
+            discussion = {
+                "id": "DISC-" + uuid.uuid4().hex[:8].upper(),
+                "node_id": node_id,
+                "topic": node.get("name") or node_id,
+                "status": "RUNNING" if mode == "llm" else "WAITING_GUIDANCE",
+                "mode": mode,
+                "messages": [],
+                "conclusion": "",
+            }
+            self.run["discussions"].append(discussion)
+            self._emit("discussion.started", node_id, "已发起多角色讨论：" + discussion["topic"])
+            if mode == "mock":
+                self._mock_discussion_round(discussion, 1)
+            self.persist()
+            self.cond.notify_all()
+            result = _clone(discussion)
+        if mode == "llm":
+            self._pool.submit(self._run_llm_discussion_round, discussion["id"], 1)
+        return True, "ok", result
+
+    def guide_discussion(self, discussion_id, message):
+        if not isinstance(message, str) or not message.strip():
+            return False, "请先填写引导意见", None
+        message = message.strip()
+        if len(message) > 2000:
+            return False, "引导意见不能超过 2000 字", None
+        with self.lock:
+            discussion = next((d for d in self.run.get("discussions", [])
+                               if d.get("id") == discussion_id), None)
+            if not discussion:
+                return False, "讨论不存在", None
+            if discussion.get("status") != "WAITING_GUIDANCE":
+                return False, "当前讨论不能继续引导", None
+            self._add_discussion_message(discussion, "human", "你", message, 2, kind="human")
+            self._emit("discussion.guidance", discussion.get("node_id"),
+                       "收到人工引导：" + message[:120])
+            mode = discussion.get("mode", "mock")
+            if mode == "llm":
+                discussion["status"] = "RUNNING"
+            else:
+                self._mock_discussion_round(discussion, 2, message)
+            self.persist()
+            self.cond.notify_all()
+            result = _clone(discussion)
+        if mode == "llm":
+            self._pool.submit(self._run_llm_discussion_round, discussion_id, 2)
+        return True, "ok", result
 
     def confirm_node(self, node_id):
         """把恢复期 UNCERTAIN 节点核定为成功，**不重复执行**。"""
@@ -2043,6 +2229,14 @@ class Engine:
         n["executing"] = True
         n["exec_token"] = token
         n["exec_started"] = self.run["elapsed"]
+        discussion = next((d for d in reversed(self.run.get("discussions", []))
+                           if d.get("node_id") == n["id"] and d.get("status") == "COMPLETE"), None)
+        discussion_context = "\n".join(
+            "%s：%s" % (m.get("speaker"), m.get("content"))
+            for m in (discussion or {}).get("messages", [])
+        )
+        if discussion_context:
+            n["logs"].append("→ 已注入该任务的群体讨论记录作为执行上下文")
         ctx = {
             "node": _clone(n),
             "requirement": self.run.get("requirement", ""),
@@ -2053,6 +2247,7 @@ class Engine:
             # 故障注入有副作用（单次模式会自行关闭），每次尝试只求值一次
             "fault": self._injected_failure(n),
             "agent": self.cfg.get("agent") or "mock",
+            "discussion_context": discussion_context,
         }
         self._pool.submit(self._run_agent, n["id"], token, ctx)
 
@@ -2295,6 +2490,7 @@ class Engine:
                          "agent", "recovered", "tasks", "spec_id", "spec_revision", "spec_hash")},
                 "nodes": self._slim_nodes(),
                 "edges": [dict(e) for e in self.run["edges"]],
+                "discussions": _clone(self.run.get("discussions") or []),
                 "events": self.run["events"][-200:],
                 "roles": ROLE_META,
                 "agents": {"current": self.cfg.get("agent", "mock"),
@@ -2629,6 +2825,14 @@ class Handler(BaseHTTPRequestHandler):
             return self._plan_spec(parts[2], body)
         if path == "/api/workflows/generate":
             return self._generate(body)
+        if path == "/api/discussions":
+            ok, msg, discussion = ENGINE.start_discussion(body.get("node_id"), body.get("mode", "mock"))
+            return self._json({"ok": ok, "message": msg, "discussion": discussion},
+                              200 if ok else 400)
+        if len(parts) == 4 and parts[0] == "api" and parts[1] == "discussions" and parts[3] == "guide":
+            ok, msg, discussion = ENGINE.guide_discussion(parts[2], body.get("message"))
+            return self._json({"ok": ok, "message": msg, "discussion": discussion},
+                              200 if ok else 400)
         if path == "/api/run/start":
             if body.get("speed") is not None:
                 ENGINE.configure(speed=body["speed"])
@@ -2730,6 +2934,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"ok": False, "message": "unknown action"}, 404)
             return self._json({"ok": ok, "message": msg}, 200 if ok else 409)
 
+        if len(parts) == 3 and parts[0] == "api" and parts[1] == "discussions":
+            return self._json({"ok": False, "message": "unknown discussion action"}, 404)
+
         return self._json({"ok": False, "message": "not found"}, 404)
 
     # ---------- SSE ----------
@@ -2778,6 +2985,7 @@ class Handler(BaseHTTPRequestHandler):
                                  "concurrency", "stats", "seq", "agent", "recovered")},
                         "nodes": ENGINE._slim_nodes(),
                         "edges": [dict(e) for e in ENGINE.run["edges"]],
+                        "discussions": _clone(ENGINE.run.get("discussions") or []),
                         "events": events[-40:],
                     }
                 if ver != last_ver or events:

@@ -44,8 +44,10 @@ python server.py --port 8010
 |工作流栏|当前定义与状态（草稿 · 基于 vN / 运行中 vN / 已发布 vN）、当前来源（「规格：…」或「需求：…」）、模板徽标、「设计规格」「快速生成」「历史」入口、未保存标记、「编辑画布」开关、保存草稿、发布版本、版本下拉|
 |左侧栏|运行统计（完成 / 运行中 / 重试 / 跳过 / 事件数）、状态图例、添加节点（编辑态）、节点库|
 |画布|分层 DAG，节点颜色=状态，边=流转（运行中蓝色流动虚线、已完成绿色）；编辑态可拖拽 / 连线 / 删除|
-|右侧栏|「节点详情」：配置、质量门、错误码与原因、尝试记录、产物 JSON、日志、人工审批（编辑态下变为节点属性表单）<br>「事件时间线」：全量事件流|
+|右侧栏|「节点详情」：配置、质量门、错误码与原因、尝试记录、产物 JSON、日志、人工审批（编辑态下变为节点属性表单）<br>「事件时间线」：全量事件流<br>「群体讨论」：按任务展示多角色发言，支持人工引导并生成结论|
 |画布底部|完成进度条、缩放 / 适应窗口（滚轮缩放，空白处拖拽平移）|
+
+群体讨论默认使用离线 Mock；也可选择 LLM 模式（需配置下文的模型环境变量）。启动工作流时，已完成讨论会作为对应 Agent 节点的上下文。
 
 \---
 
@@ -318,6 +320,8 @@ python tools/demo_matrix.py
 |GET|`/api/state`|全量快照（运行定义 + 节点 + 边 + 事件）|
 |GET|`/api/stream`|SSE 增量推送（支持 `Last-Event-ID` / `?last_seq=N` 断线续接；断线时前端自动降级为轮询）|
 |GET|`/api/agents`|已注册执行器（`mock` / `llm`）与当前生效项|
+|POST|`/api/discussions`|为 Agent 节点发起群体讨论（`node_id`、`mode`: `mock` / `llm`）|
+|POST|`/api/discussions/{id}/guide`|加入人工引导意见并继续讨论（`message`）|
 |GET|`/api/health`|健康检查（进程存活探测）|
 |GET|`/api/editor`|草稿 + 版本列表 + 运行状态（编辑器初始化）|
 |GET|`/api/workflows`|工作流清单|
@@ -362,6 +366,7 @@ python tools/demo_matrix.py
 | `python tools/graph_edit_test.py` | 结构改图后跑通（删节点 / 插节点 / 改连线）+ 单分支拦截 | 14 |
 | `python tools/generate_test.py` | 需求生成 + 编辑/发布/启动 + 人工审批 + 历史归档 | 43 |
 | `python tools/executor_test.py` | 可替换执行器 / 超时重试 / 持续超时转人工 / 错误分类 / 取消 | 22 |
+| `python tools/discussion_test.py` | Mock / LLM 多角色讨论 / 人工引导 / 上下文传递与输入校验 | 17 |
 | `python tools/agent_async_test.py` | 慢执行器不阻塞接口与调度（异步执行 / 超时 / 取消） | 14 |
 | `python tools/recovery_test.py` | 运行中杀进程 → 重启恢复（RECONCILING / UNCERTAIN）→ 核对后跑完归档 | 14 |
 | `node tools/fe_test.js` | 前端交互逻辑（编辑、连线、选中删除、需求生成、历史回看、分解预览与撤销、新建规格取消、断线提示、SSE 补丁） | 97 |

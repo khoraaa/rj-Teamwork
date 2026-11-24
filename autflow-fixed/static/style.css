@@ -252,6 +252,29 @@ pre.output .n{color:#fca5a5}
 .ev[data-type="branch.selected"] .d{background:#7c3aed}
 .ev[data-type="demo.inject"] .d{background:#db2777}
 
+.discussion-head{display:flex; align-items:center; gap:8px; margin-bottom:12px}
+.discussion-title{font-size:13px; font-weight:700; color:#1e293b}
+.discussion-mode{font-size:10px; color:#64748b; background:#f1f5f9; padding:3px 7px; border-radius:10px}
+.discussion-msg{border:1px solid var(--line); border-radius:9px; padding:9px 10px; margin-bottom:8px; background:#fff}
+.discussion-msg.human{background:#eff6ff; border-color:#bfdbfe}
+.discussion-msg .who{font-size:11px; font-weight:700; color:#334155; margin-bottom:4px}
+.discussion-msg .body{font-size:12px; line-height:1.55; color:#475569; white-space:pre-wrap; word-break:break-word}
+.discussion-round{font-size:10px; color:#94a3b8; font-weight:400; margin-left:5px}
+.discussion-actions{margin-top:12px}
+.discussion-guide{display:flex; flex-direction:column; gap:7px; margin:14px 0}
+.discussion-guide textarea{width:100%; resize:vertical; border:1px solid var(--line); border-radius:8px;
+  padding:9px 10px; font:inherit; font-size:12px; line-height:1.5; color:var(--ink); outline:0}
+.discussion-guide textarea:focus{border-color:var(--blue)}
+.discussion-conclusion{margin:12px 0; padding:10px; border-radius:9px; background:#f0fdf4;
+  border:1px solid #bbf7d0; color:#166534; font-size:12px; line-height:1.55}
+.discussion-conclusion b{display:block; margin-bottom:4px}
+.discussion-conclusion small{display:block; margin-top:6px; color:#4d7c0f}
+.discussion-start{display:flex; flex-direction:column; align-items:flex-start; gap:9px}
+.discussion-start label{font-size:11px; color:#64748b}
+.discussion-status{margin:10px 0; color:#2563eb; font-size:12px}
+.discussion-error{margin:10px 0; padding:9px; border-radius:8px; background:#fef2f2;
+  border:1px solid #fecaca; color:#b91c1c; font-size:12px; line-height:1.5}
+
 /* ---------------- statusbar / toast ---------------- */
 .statusbar{display:flex; align-items:center; gap:12px; padding:0 16px; background:var(--card);
   border-top:1px solid var(--line); font-size:11.5px; color:#64748b}

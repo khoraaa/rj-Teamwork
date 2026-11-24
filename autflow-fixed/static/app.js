@@ -44,6 +44,9 @@ const app = {
   versionDefs: {},         // 版本号 → 已发布定义
   runWorkflow: null,       // 运行中快照所绑定的定义
   frozen: false, histId: null,   // 历史回看：冻结实时刷新
+  discussions: [],
+  discussionMode: 'mock',
+  discussionDraft: '',
   def: null, defKey: '', dirty: false, errors: [],
   specs: [], specId: null, specModules: [], tasks: [],   // 设计规格 → 任务清单
   specTemplate: null,      // 规格面板选中的流程模板（标准 SE / 敏捷精简 / 企业合规）
@@ -315,6 +318,7 @@ function render() {
   renderRail();
   renderHud();
   renderDetail();
+  renderDiscussion();
   renderBanner();
   $('#stEvents').textContent = app.run.seq || 0;
   $('#canvas').classList.toggle('editable', isEditable());
@@ -598,6 +602,7 @@ function showDetailTab() {
   tabs.forEach(x => x.classList.toggle('active', x.dataset.tab === 'detail'));
   $('#paneDetail').hidden = false;
   $('#paneTimeline').hidden = true;
+  $('#paneDiscussion').hidden = true;
 }
 
 function selectNode(id) {
@@ -738,7 +743,103 @@ function renderDetail(force) {
     <div class="section-title">执行日志</div>
     <ul class="logs">${(n.logs || []).map(l => `<li>${esc(l)}</li>`).join('') || '<li>暂无日志</li>'}</ul>
     ${actions ? `<div class="actions">${actions}</div>` : ''}
+    ${!app.frozen && n.type === 'agent'
+      ? `<div class="actions"><button class="btn primary" onclick="openDiscussion('${esc(n.id)}')">查看 / 发起群体讨论</button></div>`
+      : ''}
   `;
+}
+
+function renderDiscussion() {
+  const pane = $('#paneDiscussion');
+  if (!pane) return;
+  const node = app.selected && app.nodeById[app.selected];
+  if (!node || node.type !== 'agent') {
+    pane.innerHTML = '<div class="empty">先在画布选择一个 Agent 任务，再查看或发起讨论。</div>';
+    return;
+  }
+  const discussion = (app.discussions || []).slice().reverse()
+    .find(d => d.node_id === node.id);
+  if (pane.contains(document.activeElement) &&
+      document.activeElement.matches('#discussionGuide')) return;
+  if (!discussion) {
+    pane.innerHTML = `<div class="discussion-head"><span class="discussion-title">${esc(node.name)}</span></div>
+      <div class="empty">这个任务还没有讨论记录。</div>
+      ${app.frozen ? '' : `<div class="discussion-start">
+        <label for="discussionMode">讨论模式</label>
+        <select id="discussionMode" class="select sm">
+          <option value="mock"${app.discussionMode === 'mock' ? ' selected' : ''}>离线演示</option>
+          <option value="llm"${app.discussionMode === 'llm' ? ' selected' : ''}>LLM 模型</option>
+        </select>
+        <div class="panel-note">LLM 模式需先配置模型服务环境变量。</div>
+        <button class="btn primary" onclick="startDiscussion('${esc(node.id)}', $('#discussionMode').value)">发起群体讨论</button>
+      </div>`}`;
+    return;
+  }
+  const messages = (discussion.messages || []).map(m => `
+    <div class="discussion-msg ${m.kind === 'human' ? 'human' : ''}">
+      <div class="who">${esc(m.speaker)}<span class="discussion-round">第 ${m.round} 轮</span></div>
+      <div class="body">${esc(m.content)}</div>
+    </div>`).join('');
+  const guide = discussion.status === 'WAITING_GUIDANCE' && !app.frozen
+    ? `<div class="discussion-guide">
+        <label class="section-title" for="discussionGuide">补充意见，引导下一轮</label>
+        <textarea id="discussionGuide" rows="3" maxlength="2000"
+          placeholder="例如：优先复用现有模块，不新增依赖">${esc(app.discussionDraft || '')}</textarea>
+        <button class="btn primary" onclick="guideDiscussion('${esc(discussion.id)}')">发送意见并继续</button>
+      </div>` : '';
+  const conclusion = discussion.conclusion
+    ? `<div class="discussion-conclusion"><b>讨论结论</b><div>${esc(discussion.conclusion)}</div>
+       <small>该结论会在对应 Agent 执行时作为上下文。</small></div>` : '';
+  pane.innerHTML = `<div class="discussion-head">
+      <span class="discussion-title">${esc(discussion.topic)}</span>
+      <span class="discussion-mode">${discussion.mode === 'llm' ? 'LLM 模型' : '离线演示'}</span>
+    </div>
+    <div class="discussion-messages">${messages}</div>
+    ${discussion.status === 'RUNNING' ? '<div class="discussion-status">智能体正在讨论…</div>' : ''}
+    ${discussion.error ? `<div class="discussion-error">${esc(discussion.error)}</div>` : ''}
+    ${guide}${conclusion}
+    <div class="panel-note">状态：${esc({
+      RUNNING: '讨论中', WAITING_GUIDANCE: '等待人工引导',
+      COMPLETE: '已完成', FAILED: '执行失败'
+    }[discussion.status] || discussion.status)}</div>`;
+}
+
+function openDiscussion(nodeId) {
+  app.selected = nodeId;
+  $$('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === 'discussion'));
+  $('#paneDetail').hidden = true;
+  $('#paneTimeline').hidden = true;
+  $('#paneDiscussion').hidden = false;
+  renderDiscussion();
+}
+
+async function startDiscussion(nodeId, mode) {
+  try {
+    mode = mode || app.discussionMode || 'mock';
+    const r = await api('/api/discussions', { node_id: nodeId, mode });
+    if (!r.ok) return;
+    app.discussionMode = mode;
+    openDiscussion(nodeId);
+    await refresh();
+  } catch (e) {
+    toast('发起讨论失败：' + (e && e.message ? e.message : e), true);
+  }
+}
+
+async function guideDiscussion(discussionId) {
+  const input = $('#discussionGuide');
+  const message = input ? input.value.trim() : '';
+  if (!message) { toast('请先填写引导意见', true); return; }
+  if (input) input.blur();
+  try {
+    const r = await api(`/api/discussions/${encodeURIComponent(discussionId)}/guide`, { message });
+    if (!r.ok) return;
+    app.discussionDraft = '';
+    toast('已加入人工意见，讨论已形成结论');
+    await refresh();
+  } catch (e) {
+    toast('提交意见失败：' + (e && e.message ? e.message : e), true);
+  }
 }
 
 function renderInspector(pane, n) {
@@ -924,6 +1025,7 @@ function applySnapshot(s) {
   app.runId = app.run.run_id || app.runId;
   app.nodes = s.nodes || [];
   app.edges = s.edges || [];
+  app.discussions = s.discussions || [];
   app.nodeById = {};
   app.nodes.forEach(n => app.nodeById[n.id] = n);
 
@@ -966,6 +1068,7 @@ function applyPatch(p) {
     app.nodes.forEach(n => app.nodeById[n.id] = n);
   }
   if (p.edges) app.edges = p.edges;
+  if (p.discussions) app.discussions = p.discussions;
   if (p.events && p.events.length) {
     app.lastSeq = Math.max(app.lastSeq, p.events[p.events.length - 1].seq);
     appendEvents(p.events);
@@ -1569,6 +1672,18 @@ function bindUI() {
     $$('.tab').forEach(x => x.classList.toggle('active', x === t));
     $('#paneDetail').hidden = t.dataset.tab !== 'detail';
     $('#paneTimeline').hidden = t.dataset.tab !== 'timeline';
+    $('#paneDiscussion').hidden = t.dataset.tab !== 'discussion';
+    if (t.dataset.tab === 'discussion') renderDiscussion();
+  });
+  $('#paneDiscussion').addEventListener('input', (e) => {
+    if (e.target && e.target.id === 'discussionGuide') {
+      app.discussionDraft = e.target.value;
+    }
+  });
+  $('#paneDiscussion').addEventListener('change', (e) => {
+    if (e.target && e.target.id === 'discussionMode') {
+      app.discussionMode = e.target.value;
+    }
   });
 
   document.addEventListener('keydown', (e) => {
@@ -2162,6 +2277,7 @@ async function viewHistory(runId) {
       seq: (it.events || []).length
     };
     app.nodes = it.nodes || [];
+    app.discussions = it.discussions || [];
     app.nodeById = {};
     app.nodes.forEach(n => app.nodeById[n.id] = n);
     app.edges = it.edges || [];
