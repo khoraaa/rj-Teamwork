@@ -120,9 +120,19 @@ def main():
 
     with open(os.path.join(ROOT, "static", "app.js"), encoding="utf-8") as f:
         app_js = f.read()
+    with open(os.path.join(ROOT, "static", "index.html"), encoding="utf-8") as f:
+        index_html = f.read()
     check("验收标准" in app_js and "规格出处" in app_js,
           "任务清单界面直接渲染验收标准与规格出处")
     check("syncTaskDependencies" in app_js, "任务节点编辑会同步任务依赖")
+    check('id="selSpecTemplate"' in index_html,
+          "设计规格面板提供独立的流程模板选择")
+    check("const tplSel = $('#selSpecTemplate')" in app_js,
+          "规格编排使用规格模板下拉框，不复用快速生成入口")
+    check("await refresh();" in app_js and "render();" in app_js,
+          "规格编排成功后立即刷新画布和标题")
+    check("draftName" in app_js,
+          "工作流栏标题优先使用当前草稿定义名称")
 
     if BASE:
         print("\n[5] 规格 API 与编排接口")

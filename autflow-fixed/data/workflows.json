@@ -187,7 +187,7 @@
         "description": "做一个图文内容社区：能发笔记、看推荐流、点赞评论关注、内容合规审核",
         "requirement": "做一个图文内容社区：能发笔记、看推荐流、点赞评论关注、内容合规审核",
         "spec_id": "SP2",
-        "spec_revision": 1,
+        "spec_revision": 5,
         "spec_hash": "0cb844dd70ebd3811387bd8f2246386b3fa1d1da6d47612f1b946d076f2f1dee",
         "spec_snapshot": {
           "id": "SP2",
@@ -245,8 +245,8 @@
             "灰度发布，支持按用户分桶与一键回滚"
           ],
           "created_at": "2026-11-15T18:37:45",
-          "updated_at": "2026-11-15T19:05:54",
-          "revision": 1,
+          "updated_at": "2026-11-24T08:33:17",
+          "revision": 5,
           "content_hash": "0cb844dd70ebd3811387bd8f2246386b3fa1d1da6d47612f1b946d076f2f1dee"
         },
         "tasks": [
@@ -268,13 +268,13 @@
               "SP2/derived/engineering-skeleton"
             ],
             "spec_ref": "SP2",
-            "spec_revision": 1,
+            "spec_revision": 5,
             "spec_hash": "0cb844dd70ebd3811387bd8f2246386b3fa1d1da6d47612f1b946d076f2f1dee",
             "kind": "foundation",
             "out_schema": "code-result-v1",
             "source": {
               "spec_id": "SP2",
-              "revision": 1,
+              "revision": 5,
               "module_id": "",
               "module_name": ""
             }
@@ -299,13 +299,13 @@
               "SP2/M1/acceptance"
             ],
             "spec_ref": "SP2/M1",
-            "spec_revision": 1,
+            "spec_revision": 5,
             "spec_hash": "0cb844dd70ebd3811387bd8f2246386b3fa1d1da6d47612f1b946d076f2f1dee",
             "kind": "design",
             "out_schema": "design-v1",
             "source": {
               "spec_id": "SP2",
-              "revision": 1,
+              "revision": 5,
               "module_id": "M1",
               "module_name": "账号与内容发布"
             }
@@ -332,13 +332,13 @@
               "SP2/M1/acceptance/3"
             ],
             "spec_ref": "SP2/M1",
-            "spec_revision": 1,
+            "spec_revision": 5,
             "spec_hash": "0cb844dd70ebd3811387bd8f2246386b3fa1d1da6d47612f1b946d076f2f1dee",
             "kind": "implementation",
             "out_schema": "code-result-v1",
             "source": {
               "spec_id": "SP2",
-              "revision": 1,
+              "revision": 5,
               "module_id": "M1",
               "module_name": "账号与内容发布"
             }
@@ -365,13 +365,13 @@
               "SP2/M1/acceptance/3"
             ],
             "spec_ref": "SP2/M1",
-            "spec_revision": 1,
+            "spec_revision": 5,
             "spec_hash": "0cb844dd70ebd3811387bd8f2246386b3fa1d1da6d47612f1b946d076f2f1dee",
             "kind": "verification",
             "out_schema": "test-v1",
             "source": {
               "spec_id": "SP2",
-              "revision": 1,
+              "revision": 5,
               "module_id": "M1",
               "module_name": "账号与内容发布"
             }
@@ -396,13 +396,13 @@
               "SP2/M2/acceptance"
             ],
             "spec_ref": "SP2/M2",
-            "spec_revision": 1,
+            "spec_revision": 5,
             "spec_hash": "0cb844dd70ebd3811387bd8f2246386b3fa1d1da6d47612f1b946d076f2f1dee",
             "kind": "design",
             "out_schema": "design-v1",
             "source": {
               "spec_id": "SP2",
-              "revision": 1,
+              "revision": 5,
               "module_id": "M2",
               "module_name": "信息流推荐"
             }
@@ -429,13 +429,13 @@
               "SP2/M2/acceptance/3"
             ],
             "spec_ref": "SP2/M2",
-            "spec_revision": 1,
+            "spec_revision": 5,
             "spec_hash": "0cb844dd70ebd3811387bd8f2246386b3fa1d1da6d47612f1b946d076f2f1dee",
             "kind": "implementation",
             "out_schema": "code-result-v1",
             "source": {
               "spec_id": "SP2",
-              "revision": 1,
+              "revision": 5,
               "module_id": "M2",
               "module_name": "信息流推荐"
             }
@@ -462,13 +462,13 @@
               "SP2/M2/acceptance/3"
             ],
             "spec_ref": "SP2/M2",
-            "spec_revision": 1,
+            "spec_revision": 5,
             "spec_hash": "0cb844dd70ebd3811387bd8f2246386b3fa1d1da6d47612f1b946d076f2f1dee",
             "kind": "verification",
             "out_schema": "test-v1",
             "source": {
               "spec_id": "SP2",
-              "revision": 1,
+              "revision": 5,
               "module_id": "M2",
               "module_name": "信息流推荐"
             }
@@ -495,13 +495,13 @@
               "SP2/M3/acceptance/3"
             ],
             "spec_ref": "SP2/M3",
-            "spec_revision": 1,
+            "spec_revision": 5,
             "spec_hash": "0cb844dd70ebd3811387bd8f2246386b3fa1d1da6d47612f1b946d076f2f1dee",
             "kind": "implementation",
             "out_schema": "code-result-v1",
             "source": {
               "spec_id": "SP2",
-              "revision": 1,
+              "revision": 5,
               "module_id": "M3",
               "module_name": "互动与通知"
             }
@@ -528,13 +528,13 @@
               "SP2/M3/acceptance/3"
             ],
             "spec_ref": "SP2/M3",
-            "spec_revision": 1,
+            "spec_revision": 5,
             "spec_hash": "0cb844dd70ebd3811387bd8f2246386b3fa1d1da6d47612f1b946d076f2f1dee",
             "kind": "verification",
             "out_schema": "test-v1",
             "source": {
               "spec_id": "SP2",
-              "revision": 1,
+              "revision": 5,
               "module_id": "M3",
               "module_name": "互动与通知"
             }
@@ -559,13 +559,13 @@
               "SP2/M4/acceptance"
             ],
             "spec_ref": "SP2/M4",
-            "spec_revision": 1,
+            "spec_revision": 5,
             "spec_hash": "0cb844dd70ebd3811387bd8f2246386b3fa1d1da6d47612f1b946d076f2f1dee",
             "kind": "design",
             "out_schema": "design-v1",
             "source": {
               "spec_id": "SP2",
-              "revision": 1,
+              "revision": 5,
               "module_id": "M4",
               "module_name": "内容审核与风控"
             }
@@ -592,13 +592,13 @@
               "SP2/M4/acceptance/3"
             ],
             "spec_ref": "SP2/M4",
-            "spec_revision": 1,
+            "spec_revision": 5,
             "spec_hash": "0cb844dd70ebd3811387bd8f2246386b3fa1d1da6d47612f1b946d076f2f1dee",
             "kind": "implementation",
             "out_schema": "code-result-v1",
             "source": {
               "spec_id": "SP2",
-              "revision": 1,
+              "revision": 5,
               "module_id": "M4",
               "module_name": "内容审核与风控"
             }
@@ -625,13 +625,13 @@
               "SP2/M4/acceptance/3"
             ],
             "spec_ref": "SP2/M4",
-            "spec_revision": 1,
+            "spec_revision": 5,
             "spec_hash": "0cb844dd70ebd3811387bd8f2246386b3fa1d1da6d47612f1b946d076f2f1dee",
             "kind": "verification",
             "out_schema": "test-v1",
             "source": {
               "spec_id": "SP2",
-              "revision": 1,
+              "revision": 5,
               "module_id": "M4",
               "module_name": "内容审核与风控"
             }
@@ -663,26 +663,26 @@
               "SP2/constraints/2"
             ],
             "spec_ref": "SP2",
-            "spec_revision": 1,
+            "spec_revision": 5,
             "spec_hash": "0cb844dd70ebd3811387bd8f2246386b3fa1d1da6d47612f1b946d076f2f1dee",
             "kind": "integration",
             "out_schema": "test-v1",
             "source": {
               "spec_id": "SP2",
-              "revision": 1,
+              "revision": 5,
               "module_id": "",
               "module_name": ""
             }
           }
         ],
-        "concurrency_limit": 3,
-        "template": "default",
+        "concurrency_limit": 1,
+        "template": "enterprise",
         "nodes": [
           {
             "id": "N1",
             "type": "start",
             "role": "system",
-            "name": "需求输入",
+            "name": "需求受理",
             "deps": [],
             "max_retries": 0,
             "description": "做一个图文内容社区：能发笔记、看推荐流、点赞评论关注、内容合规审核"
@@ -691,7 +691,7 @@
             "id": "N2",
             "type": "agent",
             "role": "pm",
-            "name": "需求分析与拆分",
+            "name": "需求拆解与责任分工",
             "deps": [
               "N1"
             ],
@@ -702,7 +702,7 @@
             "id": "N3",
             "type": "agent",
             "role": "architect",
-            "name": "架构与接口设计",
+            "name": "概要设计与接口契约",
             "deps": [
               "N2"
             ],
@@ -712,12 +712,23 @@
           {
             "id": "N4",
             "type": "agent",
-            "role": "coder",
-            "name": "T1 工程骨架与环境搭建",
+            "role": "qa",
+            "name": "测试计划与用例设计",
             "deps": [
               "N3"
             ],
-            "max_retries": 3,
+            "max_retries": 2,
+            "out_schema": "test-v1"
+          },
+          {
+            "id": "N5",
+            "type": "agent",
+            "role": "coder",
+            "name": "T1 工程骨架与环境搭建",
+            "deps": [
+              "N4"
+            ],
+            "max_retries": 2,
             "out_schema": "code-result-v1",
             "task_id": "T1",
             "module": "",
@@ -733,18 +744,18 @@
               "SP2/derived/engineering-skeleton"
             ],
             "kind": "foundation",
-            "spec_revision": 1,
+            "spec_revision": 5,
             "spec_hash": "0cb844dd70ebd3811387bd8f2246386b3fa1d1da6d47612f1b946d076f2f1dee"
           },
           {
-            "id": "N5",
+            "id": "N6",
             "type": "agent",
             "role": "architect",
             "name": "T2 「账号与内容发布」方案与接口设计",
             "deps": [
-              "N4"
+              "N5"
             ],
-            "max_retries": 3,
+            "max_retries": 2,
             "out_schema": "design-v1",
             "task_id": "T2",
             "module": "账号与内容发布",
@@ -760,18 +771,18 @@
               "SP2/M1/acceptance"
             ],
             "kind": "design",
-            "spec_revision": 1,
+            "spec_revision": 5,
             "spec_hash": "0cb844dd70ebd3811387bd8f2246386b3fa1d1da6d47612f1b946d076f2f1dee"
           },
           {
-            "id": "N6",
+            "id": "N7",
             "type": "agent",
             "role": "coder",
             "name": "T3 「账号与内容发布」功能实现",
             "deps": [
-              "N5"
+              "N6"
             ],
-            "max_retries": 3,
+            "max_retries": 2,
             "out_schema": "code-result-v1",
             "task_id": "T3",
             "module": "账号与内容发布",
@@ -789,18 +800,18 @@
               "SP2/M1/acceptance/3"
             ],
             "kind": "implementation",
-            "spec_revision": 1,
+            "spec_revision": 5,
             "spec_hash": "0cb844dd70ebd3811387bd8f2246386b3fa1d1da6d47612f1b946d076f2f1dee"
           },
           {
-            "id": "N7",
+            "id": "N8",
             "type": "agent",
             "role": "qa",
             "name": "T4 「账号与内容发布」验收与回归",
             "deps": [
-              "N6"
+              "N7"
             ],
-            "max_retries": 3,
+            "max_retries": 2,
             "out_schema": "test-v1",
             "task_id": "T4",
             "module": "账号与内容发布",
@@ -818,18 +829,18 @@
               "SP2/M1/acceptance/3"
             ],
             "kind": "verification",
-            "spec_revision": 1,
+            "spec_revision": 5,
             "spec_hash": "0cb844dd70ebd3811387bd8f2246386b3fa1d1da6d47612f1b946d076f2f1dee"
           },
           {
-            "id": "N8",
+            "id": "N9",
             "type": "agent",
             "role": "architect",
             "name": "T5 「信息流推荐」方案与接口设计",
             "deps": [
-              "N4"
+              "N5"
             ],
-            "max_retries": 3,
+            "max_retries": 2,
             "out_schema": "design-v1",
             "task_id": "T5",
             "module": "信息流推荐",
@@ -845,18 +856,18 @@
               "SP2/M2/acceptance"
             ],
             "kind": "design",
-            "spec_revision": 1,
+            "spec_revision": 5,
             "spec_hash": "0cb844dd70ebd3811387bd8f2246386b3fa1d1da6d47612f1b946d076f2f1dee"
           },
           {
-            "id": "N9",
+            "id": "N10",
             "type": "agent",
             "role": "coder",
             "name": "T6 「信息流推荐」功能实现",
             "deps": [
-              "N8"
+              "N9"
             ],
-            "max_retries": 3,
+            "max_retries": 2,
             "out_schema": "code-result-v1",
             "task_id": "T6",
             "module": "信息流推荐",
@@ -874,18 +885,18 @@
               "SP2/M2/acceptance/3"
             ],
             "kind": "implementation",
-            "spec_revision": 1,
+            "spec_revision": 5,
             "spec_hash": "0cb844dd70ebd3811387bd8f2246386b3fa1d1da6d47612f1b946d076f2f1dee"
           },
           {
-            "id": "N10",
+            "id": "N11",
             "type": "agent",
             "role": "qa",
             "name": "T7 「信息流推荐」验收与回归",
             "deps": [
-              "N9"
+              "N10"
             ],
-            "max_retries": 3,
+            "max_retries": 2,
             "out_schema": "test-v1",
             "task_id": "T7",
             "module": "信息流推荐",
@@ -903,18 +914,18 @@
               "SP2/M2/acceptance/3"
             ],
             "kind": "verification",
-            "spec_revision": 1,
+            "spec_revision": 5,
             "spec_hash": "0cb844dd70ebd3811387bd8f2246386b3fa1d1da6d47612f1b946d076f2f1dee"
           },
           {
-            "id": "N11",
+            "id": "N12",
             "type": "agent",
             "role": "coder",
             "name": "T8 「互动与通知」功能实现",
             "deps": [
-              "N4"
+              "N5"
             ],
-            "max_retries": 3,
+            "max_retries": 2,
             "out_schema": "code-result-v1",
             "task_id": "T8",
             "module": "互动与通知",
@@ -932,18 +943,18 @@
               "SP2/M3/acceptance/3"
             ],
             "kind": "implementation",
-            "spec_revision": 1,
+            "spec_revision": 5,
             "spec_hash": "0cb844dd70ebd3811387bd8f2246386b3fa1d1da6d47612f1b946d076f2f1dee"
           },
           {
-            "id": "N12",
+            "id": "N13",
             "type": "agent",
             "role": "qa",
             "name": "T9 「互动与通知」验收与回归",
             "deps": [
-              "N11"
+              "N12"
             ],
-            "max_retries": 3,
+            "max_retries": 2,
             "out_schema": "test-v1",
             "task_id": "T9",
             "module": "互动与通知",
@@ -961,18 +972,18 @@
               "SP2/M3/acceptance/3"
             ],
             "kind": "verification",
-            "spec_revision": 1,
+            "spec_revision": 5,
             "spec_hash": "0cb844dd70ebd3811387bd8f2246386b3fa1d1da6d47612f1b946d076f2f1dee"
           },
           {
-            "id": "N13",
+            "id": "N14",
             "type": "agent",
             "role": "architect",
             "name": "T10 「内容审核与风控」方案与接口设计",
             "deps": [
-              "N4"
+              "N5"
             ],
-            "max_retries": 3,
+            "max_retries": 2,
             "out_schema": "design-v1",
             "task_id": "T10",
             "module": "内容审核与风控",
@@ -988,18 +999,18 @@
               "SP2/M4/acceptance"
             ],
             "kind": "design",
-            "spec_revision": 1,
+            "spec_revision": 5,
             "spec_hash": "0cb844dd70ebd3811387bd8f2246386b3fa1d1da6d47612f1b946d076f2f1dee"
           },
           {
-            "id": "N14",
+            "id": "N15",
             "type": "agent",
             "role": "coder",
             "name": "T11 「内容审核与风控」功能实现",
             "deps": [
-              "N13"
+              "N14"
             ],
-            "max_retries": 3,
+            "max_retries": 2,
             "out_schema": "code-result-v1",
             "task_id": "T11",
             "module": "内容审核与风控",
@@ -1017,18 +1028,18 @@
               "SP2/M4/acceptance/3"
             ],
             "kind": "implementation",
-            "spec_revision": 1,
+            "spec_revision": 5,
             "spec_hash": "0cb844dd70ebd3811387bd8f2246386b3fa1d1da6d47612f1b946d076f2f1dee"
           },
           {
-            "id": "N15",
+            "id": "N16",
             "type": "agent",
             "role": "qa",
             "name": "T12 「内容审核与风控」验收与回归",
             "deps": [
-              "N14"
+              "N15"
             ],
-            "max_retries": 3,
+            "max_retries": 2,
             "out_schema": "test-v1",
             "task_id": "T12",
             "module": "内容审核与风控",
@@ -1046,21 +1057,21 @@
               "SP2/M4/acceptance/3"
             ],
             "kind": "verification",
-            "spec_revision": 1,
+            "spec_revision": 5,
             "spec_hash": "0cb844dd70ebd3811387bd8f2246386b3fa1d1da6d47612f1b946d076f2f1dee"
           },
           {
-            "id": "N16",
+            "id": "N17",
             "type": "agent",
             "role": "qa",
             "name": "T13 集成联调与整体验收",
             "deps": [
-              "N7",
-              "N10",
-              "N12",
-              "N15"
+              "N8",
+              "N11",
+              "N13",
+              "N16"
             ],
-            "max_retries": 3,
+            "max_retries": 2,
             "out_schema": "test-v1",
             "task_id": "T13",
             "module": "",
@@ -1080,83 +1091,105 @@
               "SP2/constraints/2"
             ],
             "kind": "integration",
-            "spec_revision": 1,
+            "spec_revision": 5,
             "spec_hash": "0cb844dd70ebd3811387bd8f2246386b3fa1d1da6d47612f1b946d076f2f1dee"
-          },
-          {
-            "id": "N17",
-            "type": "condition",
-            "role": "qa",
-            "name": "质量门判定",
-            "deps": [
-              "N16"
-            ],
-            "max_retries": 0,
-            "expression": "qa_score >= 80"
           },
           {
             "id": "N18",
             "type": "agent",
             "role": "qa",
-            "name": "回归测试",
+            "name": "集成验证",
             "deps": [
               "N17"
-            ],
-            "max_retries": 2,
-            "out_schema": "test-v1"
-          },
-          {
-            "id": "N19",
-            "type": "agent",
-            "role": "coder",
-            "name": "针对性修复与重构",
-            "deps": [
-              "N17"
-            ],
-            "max_retries": 2,
-            "out_schema": "code-result-v1"
-          },
-          {
-            "id": "N20",
-            "type": "agent",
-            "role": "qa",
-            "name": "合并验证",
-            "deps": [
-              "N18",
-              "N19"
             ],
             "max_retries": 2,
             "out_schema": "verify-v1",
             "join": "any"
           },
           {
-            "id": "N21",
+            "id": "N19",
+            "type": "condition",
+            "role": "qa",
+            "name": "合规评分",
+            "deps": [
+              "N18"
+            ],
+            "max_retries": 0,
+            "expression": "qa_score >= 90"
+          },
+          {
+            "id": "N20",
             "type": "agent",
             "role": "qa",
-            "name": "安全与合规评审",
+            "name": "合规复核",
             "deps": [
-              "N20"
+              "N19"
             ],
             "max_retries": 2,
             "out_schema": "scan-v1"
           },
           {
+            "id": "N21",
+            "type": "agent",
+            "role": "coder",
+            "name": "合规整改",
+            "deps": [
+              "N19"
+            ],
+            "max_retries": 2,
+            "out_schema": "code-result-v1"
+          },
+          {
             "id": "N22",
+            "type": "agent",
+            "role": "qa",
+            "name": "评审结论汇总",
+            "deps": [
+              "N20",
+              "N21"
+            ],
+            "max_retries": 2,
+            "out_schema": "verify-v1",
+            "join": "any"
+          },
+          {
+            "id": "N23",
+            "type": "agent",
+            "role": "qa",
+            "name": "安全与合规评审",
+            "deps": [
+              "N22"
+            ],
+            "max_retries": 2,
+            "out_schema": "scan-v1"
+          },
+          {
+            "id": "N24",
             "type": "approval",
             "role": "human",
-            "name": "上线审批",
+            "name": "合规负责人审批",
             "deps": [
-              "N21"
+              "N23"
             ],
             "max_retries": 0
           },
           {
-            "id": "N23",
+            "id": "N25",
+            "type": "approval",
+            "role": "human",
+            "name": "上线发布确认",
+            "deps": [
+              "N24"
+            ],
+            "max_retries": 0
+          },
+          {
+            "id": "N26",
             "type": "end",
             "role": "system",
-            "name": "交付完成",
+            "name": "归档交付",
             "deps": [
-              "N22"
+              "N25"
             ],
             "max_retries": 0
           }
@@ -1187,11 +1220,11 @@
             "target": "N7"
           },
           {
-            "source": "N4",
+            "source": "N7",
             "target": "N8"
           },
           {
-            "source": "N8",
+            "source": "N5",
             "target": "N9"
           },
           {
@@ -1199,19 +1232,19 @@
             "target": "N10"
           },
           {
-            "source": "N4",
+            "source": "N10",
             "target": "N11"
           },
           {
-            "source": "N11",
+            "source": "N5",
             "target": "N12"
           },
           {
-            "source": "N4",
+            "source": "N12",
             "target": "N13"
           },
           {
-            "source": "N13",
+            "source": "N5",
             "target": "N14"
           },
           {
@@ -1219,20 +1252,20 @@
             "target": "N15"
           },
           {
-            "source": "N7",
-            "target": "N16"
-          },
-          {
-            "source": "N10",
-            "target": "N16"
-          },
-          {
-            "source": "N12",
-            "target": "N16"
-          },
-          {
             "source": "N15",
             "target": "N16"
+          },
+          {
+            "source": "N8",
+            "target": "N17"
+          },
+          {
+            "source": "N11",
+            "target": "N17"
+          },
+          {
+            "source": "N13",
+            "target": "N17"
           },
           {
             "source": "N16",
@@ -1240,25 +1273,25 @@
           },
           {
             "source": "N17",
-            "target": "N18",
-            "label": "true"
-          },
-          {
-            "source": "N17",
-            "target": "N19",
-            "label": "false"
+            "target": "N18"
           },
           {
             "source": "N18",
-            "target": "N20"
+            "target": "N19"
           },
           {
             "source": "N19",
-            "target": "N20"
+            "target": "N20",
+            "label": "true"
+          },
+          {
+            "source": "N19",
+            "target": "N21",
+            "label": "false"
           },
           {
             "source": "N20",
-            "target": "N21"
+            "target": "N22"
           },
           {
             "source": "N21",
@@ -1267,12 +1300,24 @@
           {
             "source": "N22",
             "target": "N23"
+          },
+          {
+            "source": "N23",
+            "target": "N24"
+          },
+          {
+            "source": "N24",
+            "target": "N25"
+          },
+          {
+            "source": "N25",
+            "target": "N26"
           }
         ]
       },
       "base_version": "v1",
       "dirty": false,
-      "updated_at": "2026-11-15T23:37:53"
+      "updated_at": "2026-11-24T09:21:34"
     }
   }
 }

@@ -359,9 +359,12 @@ function renderTopbar() {
 
 function renderWfBar() {
   const e = app.editor;
+  const draftName = e && e.draft && e.draft.definition
+    ? (e.draft.definition.name || '')
+    : '';
   $('#wfName').textContent = app.frozen
     ? ((app.run.workflow_name || '—') + ' · 历史回看')
-    : (e ? e.name : '—');
+    : (draftName || (e ? e.name : '—'));
   const chip = $('#wfState');
   const runStatus = app.run.status || 'IDLE';
   const active = ['RUNNING', 'PAUSED', 'WAITING_HUMAN', 'RECONCILING'].includes(runStatus);
@@ -958,27 +961,34 @@ async function loadEditor() {
 /* 流程模板：后端 templates/*.json 的索引，决定能力域词典与阶段编排 */
 async function loadTemplates() {
   const sel = $('#selTemplate');
+  const specSel = $('#selSpecTemplate');
   try {
     const r = await getJSON('/api/templates');
     const list = r.templates || [];
     app.templates = list;
-    sel.innerHTML = list.map(t =>
+    const options = list.map(t =>
       `<option value="${esc(t.id)}" title="${esc(t.description || '')}">${esc(t.name)} · ${t.stages} 阶段</option>`
     ).join('');
+    sel.innerHTML = options;
+    specSel.innerHTML = options;
     sel.hidden = !list.length;
+    specSel.hidden = !list.length;
   } catch (e) {
     sel.hidden = true; /* 旧服务端没有该接口 */
+    specSel.hidden = true;
   }
   syncTemplateSelect();
 }
 
-/* 下拉框跟随"当前草稿是哪个模板生成的" */
+/* 快速生成与规格编排各有独立模板选择；跟随当前草稿同步默认值。 */
 function syncTemplateSelect() {
   const sel = $('#selTemplate');
+  const specSel = $('#selSpecTemplate');
   const e = app.editor;
   const cur = e && e.draft && e.draft.definition && e.draft.definition.template;
   if (!cur || !(app.templates || []).some(t => t.id === cur)) return;
   sel.value = cur;
+  specSel.value = cur;
 }
 
 /* ------------------------------------------------------------ 编辑操作 */
@@ -1722,12 +1732,23 @@ async function planSpec() {
   const btn = $('#btnSpecPlan'), note = $('#specNote');
   btn.disabled = true; btn.textContent = '编排中…';
   try {
-    const tplSel = $('#selTemplate');
+    const tplSel = $('#selSpecTemplate');
     const r = await api('/api/specs/' + encodeURIComponent(app.specId) + '/plan',
                         { template: (tplSel && tplSel.value) || 'default' });
     if (!r.ok) { note.textContent = r.message || '编排失败'; return; }
     app.tasks = r.tasks || [];
+    app.mode = 'view';
+    app.viewVersion = 'draft';
+    app.dirty = false;
+    app.errors = [];
+    app.selected = null;
+    app.selEdge = null;
+    app.defKey = '';
+    app.needFit = true;
+    $('#tglEdit').checked = false;
     await loadEditor();
+    await refresh();
+    render();
     closeSpec();
     setFoot(`已按规格编排 ${r.tasks.length} 条任务 · ${r.stats.nodes} 节点 / ${r.stats.edges} 边`);
     toast('已编排成工作流草稿');
