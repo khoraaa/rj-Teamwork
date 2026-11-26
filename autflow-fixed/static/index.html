@@ -55,6 +55,8 @@
   <span class="req-label" id="reqLabel" title="当前草稿的来源：设计规格或其一句话需求，点击查看" onclick="openSpec()">规格：—</span>
   <span class="grow"></span>
   <span class="wf-err" id="wfErr"></span>
+  <button class="mode-chip" id="btnModel" onclick="openModel()"
+          title="当前执行模式（模拟 / 真实模型），点这里配置大模型：Base URL、模型名、API Key">模拟</button>
   <button class="btn sm primary" id="btnSpec" onclick="openSpec()">设计规格</button>
   <button class="btn sm" id="btnReq" onclick="openReq()" title="只有一句话需求时用：跳过任务分解，直接按关键词生成">快速生成</button>
   <button class="btn sm" id="btnHist" onclick="openHist()">历史</button>
@@ -68,6 +70,14 @@
 
 <main class="layout">
   <aside class="rail">
+    <div class="rail-block phase-task-block">
+      <div class="rail-title task-list-title">
+        <span>阶段任务</span>
+        <span class="task-list-count" id="taskListCount"></span>
+      </div>
+      <div class="phase-task-list" id="phaseTaskList"></div>
+    </div>
+
     <div class="rail-block">
       <div class="rail-title">运行统计</div>
       <div class="stat-row"><span>完成</span><b id="stSuccess">0</b></div>
@@ -124,6 +134,7 @@
         </marker>
       </defs>
       <g id="viewport">
+        <g id="phaseLayer"></g>
         <g id="edgeLayer"></g>
         <g id="nodeLayer"></g>
       </g>
@@ -148,7 +159,7 @@
     <div class="tabs">
       <button class="tab active" data-tab="detail">节点详情</button>
       <button class="tab" data-tab="timeline">事件时间线</button>
-      <button class="tab" data-tab="discussion">群体讨论</button>
+      <button class="tab" data-tab="files">运行产物 <b id="fileCount" class="tab-badge">0</b></button>
     </div>
     <div class="pane" id="paneDetail">
       <div class="empty">点击画布中的节点，查看它的配置、质量门、产物与日志。</div>
@@ -156,7 +167,20 @@
     <div class="pane" id="paneTimeline" hidden>
       <div class="timeline" id="timeline"></div>
     </div>
-    <div class="pane" id="paneDiscussion" hidden></div>
+    <div class="pane" id="paneFiles" hidden>
+      <div class="files-head">
+        <span class="panel-note" id="filesHint">真实模型写入的文件会出现在这里</span>
+        <button class="btn sm ghost" id="btnFileReload" onclick="loadRunFiles()">刷新</button>
+      </div>
+      <div class="file-list" id="fileList"><div class="empty">还没有产物</div></div>
+      <div class="file-view" id="fileView" hidden>
+        <div class="file-view-head">
+          <b id="fileViewPath">—</b>
+          <button class="panel-x" onclick="closeFileView()" title="关闭">×</button>
+        </div>
+        <pre id="fileViewBody"></pre>
+      </div>
+    </div>
   </aside>
 </main>
 
@@ -213,6 +237,20 @@
   <div class="panel-body">
     <div class="panel-hint">规格写「要做什么」，模板决定「按什么流程做」。保存后由 PM Agent 分解成任务清单再编排成 DAG。</div>
 
+    <div class="import-box">
+      <div class="import-row">
+        <label class="btn sm" for="specFile" title="支持 .md / .txt / .json">导入设计规格</label>
+        <input type="file" id="specFile" accept=".md,.markdown,.txt,.json" hidden onchange="importSpecFile(this)">
+        <button class="btn sm ghost" id="btnSpecPaste" onclick="toggleSpecPaste()">粘贴文本</button>
+        <span class="panel-note" id="importNote">把 Markdown 规格读成模块 + 验收条款</span>
+      </div>
+      <textarea id="specPaste" rows="6" hidden placeholder="把设计规格正文粘贴到这里，或直接把 .md 文件拖到页面里&#10;&#10;## 模块&#10;### 登录：账号密码 + 短信验证码&#10;验收：密码错误提示明确"></textarea>
+      <div class="import-row" id="pasteActions" hidden>
+        <button class="btn sm primary" onclick="parseSpecText()">解析并填入表单</button>
+        <button class="btn sm ghost" onclick="toggleSpecPaste()">收起</button>
+      </div>
+    </div>
+
     <label class="label-sm" for="selSpecTemplate">流程模板 <span class="hint-inline">标准 SE / 敏捷精简 / 企业合规</span></label>
     <select class="select sm wide" id="selSpecTemplate" title="流程模板：决定阶段编排、质量门、安全与合规评审"></select>
     <div class="tpl-desc" id="specTplDesc"></div>
@@ -237,8 +275,30 @@
     <div id="specModules"></div>
     <button class="btn sm" onclick="addSpecModule()">+ 添加模块</button>
 
-    <label class="label-sm" for="specConstraints">全局约束 <span class="hint-inline">每行一条</span></label>
-    <textarea id="specConstraints" rows="2" placeholder="例：不新增第三方依赖&#10;密码只存哈希"></textarea>
+    <div class="label-row">
+      <label class="label-sm" for="specConstraints">全局约束 <span class="hint-inline">每行一条，进整体验收的验收清单</span></label>
+      <span class="hint-inline" id="specConstraintCount">0 条</span>
+    </div>
+    <textarea id="specConstraints" rows="6" class="grow-area" oninput="syncConstraintCount()"
+              placeholder="例：不新增第三方依赖&#10;密码只存哈希&#10;所有接口 200ms 内返回&#10;不能改动已有数据表结构"></textarea>
+
+    <div class="discuss-box">
+      <div class="decomp-head">
+        <b>多智能体讨论 · AI 出任务清单</b>
+        <span class="panel-note" id="discussHint">产品经理 / 架构师 / 开发者 / 测试 / 评审依次发言，两轮后汇总成任务清单</span>
+      </div>
+      <div class="discuss-actions">
+        <button class="btn primary" id="btnDiscuss" onclick="startDiscuss()">让 AI 群体讨论并出任务清单</button>
+        <button class="btn ghost" id="btnDiscussStop" onclick="stopDiscuss()" hidden>停止讨论</button>
+        <span class="discuss-badge" id="discussBadge" hidden></span>
+      </div>
+      <div class="discuss-say" id="discussSayRow" hidden>
+        <input id="discussSay" class="dis-say-input" placeholder="插一句话引导讨论，例如：只讨论交易模块 / 不要引入新依赖 / 先做登录"
+               onkeydown="if(event.key==='Enter'){event.preventDefault();sendDiscussSay();}">
+        <button class="btn sm" id="btnDiscussSay" onclick="sendDiscussSay()">插话引导</button>
+      </div>
+      <div class="discuss-log" id="discussLog" hidden></div>
+    </div>
 
     <div id="specDecomp" hidden>
       <div class="decomp-head">
@@ -254,6 +314,102 @@
     <button class="btn" id="btnSpecPlan" onclick="planSpec()" title="按已保存的规格和当前模板生成 DAG 草稿">分解并编排</button>
     <button class="btn primary" id="btnSpecSave" onclick="saveSpec()">保存规格</button>
     <span class="panel-note" id="specNote"></span>
+  </div>
+</aside>
+
+<!-- 模型配置 -->
+<aside class="panel" id="modelPanel" hidden>
+  <div class="panel-head">
+    <b>大模型接入</b>
+    <button class="panel-x" onclick="closeModel()" title="关闭">×</button>
+  </div>
+  <div class="panel-body">
+    <div class="panel-hint">
+      配置后，编码 / 测试 / 评审节点会由模型在隔离工作区里<b>真的写代码、真的跑测试</b>；
+      不配置时走本地确定性模拟（界面会标「模拟」）。
+      密钥只存在本机 <code>data/settings.json</code>，接口只回掩码。
+    </div>
+
+    <div class="mode-switch">
+      <label class="switch">
+        <input type="checkbox" id="tglUseLLM" onchange="onModeToggle()">
+        <span>使用真实模型执行</span>
+      </label>
+      <span class="mode-chip" id="modelState">未配置</span>
+    </div>
+
+    <label class="label-sm" for="setProvider">服务商预设</label>
+    <select class="select sm wide" id="setProvider" onchange="applyPreset(this.value)"></select>
+
+    <label class="label-sm" for="setBaseUrl">Base URL <span class="hint-inline">OpenAI 兼容填到 /v1</span></label>
+    <input class="field" id="setBaseUrl" placeholder="https://api.deepseek.com/v1">
+
+    <label class="label-sm" for="setModel">模型名</label>
+    <input class="field" id="setModel" placeholder="deepseek-chat">
+
+    <label class="label-sm" for="setKey">API Key <span class="hint-inline" id="setKeyHint">未保存</span></label>
+    <div class="key-row">
+      <input class="field" id="setKey" type="password" placeholder="sk-…（留空表示不修改已保存的密钥）">
+      <button class="btn sm ghost danger" onclick="clearKey()" title="彻底删除磁盘上的密钥并回到模拟模式">彻底清除</button>
+    </div>
+
+    <div class="grid-2">
+      <div>
+        <label class="label-sm" for="setTemp">temperature</label>
+        <input class="field" id="setTemp" type="number" step="0.1" min="0" max="2" value="0.2">
+      </div>
+      <div>
+        <label class="label-sm" for="setSteps">单节点最多工具步数</label>
+        <input class="field" id="setSteps" type="number" min="1" max="40" value="14">
+      </div>
+    </div>
+
+    <div class="grid-2">
+      <div>
+        <label class="label-sm" for="setMaxTokens">max_tokens</label>
+        <input class="field" id="setMaxTokens" type="number" min="256" max="32000" value="4096">
+      </div>
+      <div>
+        <label class="label-sm" for="setTimeout">单次请求超时（秒）</label>
+        <input class="field" id="setTimeout" type="number" min="10" max="600" value="180">
+      </div>
+    </div>
+
+    <div id="probeBox" class="probe-box" hidden></div>
+
+    <div class="ai-section">
+      <div class="decomp-head">
+        <b>多个 AI 接入</b>
+        <span class="panel-note">可以接多个模型：讨论时各角色可互相反驳，执行时按分组/节点指派</span>
+      </div>
+      <div id="aiList" class="ai-list"><div class="muted">还没有额外的 AI；下面可以直接加一个</div></div>
+
+      <details class="ai-add">
+        <summary>+ 新增一个 AI</summary>
+        <div class="ai-form">
+          <input class="field" id="aiLabel" placeholder="名字，如：DeepSeek 评审专用">
+          <select class="select sm" id="aiProvider" onchange="aiApplyPreset()"></select>
+          <input class="field" id="aiBaseUrl" placeholder="Base URL，填到 /v1">
+          <input class="field" id="aiModel" placeholder="模型名，如 deepseek-chat">
+          <input class="field" id="aiKey" type="password" placeholder="API Key（只存本机，接口只回掩码）">
+          <button class="btn primary" onclick="saveAI()">保存这个 AI</button>
+        </div>
+      </details>
+
+      <div class="ai-assign">
+        <div class="ai-assign-title">讨论角色分工 <span class="panel-note">不选就用默认 AI</span></div>
+        <div id="roleAiRows" class="ai-assign-rows"></div>
+      </div>
+      <div class="ai-assign">
+        <div class="ai-assign-title">任务分组分工 <span class="panel-note">这个分组下的节点默认用哪个 AI</span></div>
+        <div id="partAiRows" class="ai-assign-rows"></div>
+      </div>
+    </div>
+  </div>
+  <div class="panel-foot">
+    <button class="btn" id="btnProbe" onclick="probeModel()">测试连接</button>
+    <button class="btn primary" id="btnSaveSettings" onclick="saveSettings()">保存配置</button>
+    <span class="panel-note" id="modelNote"></span>
   </div>
 </aside>
 

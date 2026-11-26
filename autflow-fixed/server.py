@@ -37,6 +37,19 @@ DATA_DIR = os.environ.get("AUTFLOW_DATA_DIR") or os.path.join(BASE_DIR, "data")
 STORE_PATH = os.path.join(DATA_DIR, "workflows.json")
 RUN_STATE_PATH = os.path.join(DATA_DIR, "run_state.json")
 SPEC_PATH = os.path.join(DATA_DIR, "specs.json")
+SETTINGS_PATH = os.path.join(DATA_DIR, "settings.json")
+# 每次运行一个隔离工作区：模型在这里真的写代码、真的跑测试
+WORKSPACES_DIR = os.path.join(DATA_DIR, "workspaces")
+
+sys.path.insert(0, BASE_DIR)
+import llm_client                                    # noqa: E402  模型接入与密钥管理
+import spec_import                                   # noqa: E402  设计规格文档解析
+import tool_agent                                    # noqa: E402  带工具的真实执行器
+import multi_agent                                   # noqa: E402  多智能体规划讨论
+
+SETTINGS = llm_client.SettingsStore(SETTINGS_PATH)
+LLM = llm_client.LLMClient(SETTINGS)
+PLANNER = multi_agent.PlanManager(LLM, SETTINGS)
 
 # --------------------------------------------------------------------------
 # 种子工作流定义（首次启动写入仓库，作为 v1 发布版本）
@@ -88,6 +101,8 @@ ROLE_META = {
     "pm":        {"label": "产品经理", "color": "#8b5cf6", "base_sec": 1.2},
     "architect": {"label": "架构师",   "color": "#0ea5e9", "base_sec": 1.8},
     "coder":     {"label": "开发者",   "color": "#2563eb", "base_sec": 2.6},
+    "tester":    {"label": "测试工程师", "color": "#14b8a6", "base_sec": 1.6},
+    "reviewer":  {"label": "代码评审", "color": "#a855f7", "base_sec": 1.2},
     "qa":        {"label": "质量工程师", "color": "#f59e0b", "base_sec": 1.4},
     "human":     {"label": "人工审批", "color": "#d97706", "base_sec": 0.0},
 }
@@ -101,7 +116,73 @@ NODE_FIELDS = ("id", "type", "name", "role", "deps", "status", "retry_count", "a
                "join", "max_retries", "out_schema", "started_at", "finished_at", "branch_taken",
                # 任务清单字段（由规格分解而来）：进快照后前端右栏才能显示验收条款与规格出处
                "task_id", "module", "spec_ref", "priority", "estimate", "acceptance",
-               "acceptance_sources", "kind", "spec_revision", "spec_hash")
+               "acceptance_sources", "kind", "spec_revision", "spec_hash",
+               # 任务分组（part）与这个节点指定的 AI（ai 为空表示按分组/默认走）
+               "part", "part_label", "ai")
+
+
+# 任务分组：比"阶段"更细的一层，画布上同组节点用同色底框圈起来
+PARTS = [
+    {"id": "skeleton", "label": "工程骨架", "color": "#64748b"},
+    {"id": "data", "label": "数据模型", "color": "#0ea5e9"},
+    {"id": "api", "label": "接口实现", "color": "#8b5cf6"},
+    {"id": "feature", "label": "功能实现", "color": "#22c55e"},
+    {"id": "test", "label": "测试验证", "color": "#f59e0b"},
+    {"id": "review", "label": "代码评审", "color": "#ef4444"},
+    {"id": "integrate", "label": "集成验收", "color": "#14b8a6"},
+    {"id": "delivery", "label": "交付", "color": "#a855f7"},
+]
+PART_BY_ID = {p["id"]: p for p in PARTS}
+# 模板自带的流程节点没有 task 记录，按名字/角色归入分组
+PART_NAME_HINTS = (
+    ("需求输入", "skeleton"), ("需求分析", "skeleton"), ("架构", "skeleton"),
+    ("质量门", "test"), ("回归测试", "test"), ("修复", "feature"),
+    ("合并验证", "integrate"), ("安全", "review"), ("合规评审", "review"),
+    ("上线审批", "delivery"), ("交付", "delivery"),
+)
+PART_ROLE_HINTS = {"pm": "skeleton", "architect": "skeleton", "tester": "test",
+                   "reviewer": "review", "ops": "delivery", "human": "delivery",
+                   "system": "skeleton", "coder": "feature"}
+KIND_PART = {"foundation": "skeleton", "design": "skeleton",
+             "implementation": "feature", "verification": "test",
+             "review": "review", "integration": "integrate",
+             "delivery": "delivery"}
+
+
+def part_of_task(task):
+    """任务属于哪个分组：先看显式 part，再按标题细化，最后按 kind 回落。"""
+    raw = (task.get("part") or "").strip()
+    if raw in PART_BY_ID:
+        return raw
+    title = (task.get("title") or "") + " " + (task.get("what") or "")
+    if "数据模型" in title or "迁移" in title:
+        return "data"
+    if "接口" in title:
+        return "api"
+    return KIND_PART.get(task.get("kind") or "", "feature")
+
+
+def part_label(part_id):
+    return PART_BY_ID.get(part_id, {}).get("label") or "其他"
+
+
+def annotate_parts(nodes):
+    """给没有分组的节点补上 part（任务节点在 plan_from_tasks 里已带）。"""
+    for n in nodes:
+        if n.get("part"):
+            continue
+        name = n.get("name") or ""
+        pid = ""
+        for kw, cand in PART_NAME_HINTS:
+            if kw in name:
+                pid = cand
+                break
+        n["part"] = pid or PART_ROLE_HINTS.get(n.get("role") or "", "feature")
+        n["part_label"] = part_label(n["part"])
+
+
+# 内置演示流程是手写常量，没有 task 记录：进内存时补一次分组
+annotate_parts(WORKFLOW["nodes"])
 
 
 # --------------------------------------------------------------------------
@@ -462,6 +543,8 @@ def generate_workflow(requirement, name=None, template="default"):
                       + "（同一层，受并发上限约束）")
 
     nodes, edges, index, info = _walk_pipeline(tpl, text, trace, segment, risk=bool(risk))
+    # 模板节点也要有分组，否则画布上只剩任务节点有色框
+    annotate_parts(nodes)
     fanout_line = info["fanout_line"]
     cond, branch_map = info["cond"], info["branch_map"]
 
@@ -497,7 +580,7 @@ def generate_workflow(requirement, name=None, template="default"):
 
 TASK_ROLE_TO_AGENT = {
     "架构师": "architect", "前端": "coder", "后端": "coder",
-    "测试": "qa", "运维": "coder",
+    "测试": "tester", "评审": "reviewer", "运维": "coder",
 }
 
 
@@ -532,6 +615,9 @@ def plan_from_tasks(spec, tasks, template="default"):
             node["acceptance"] = list(t.get("acceptance") or [])
             node["acceptance_sources"] = list(t.get("acceptance_sources") or [])
             node["kind"] = t.get("kind")
+            node["part"] = part_of_task(t)
+            node["part_label"] = part_label(node["part"])
+            node["ai"] = (t.get("ai") or "").strip()
             node["spec_revision"] = t.get("spec_revision")
             node["spec_hash"] = t.get("spec_hash")
             node["out_schema"] = t.get("out_schema") or step.get("out_schema")
@@ -552,6 +638,7 @@ def plan_from_tasks(spec, tasks, template="default"):
                           len([t for t in tasks if not t.get("depends_on")])))
 
     nodes, edges, index, info = _walk_pipeline(tpl, text, trace, segment, risk=bool(risk))
+    annotate_parts(nodes)
     if info["fanout_line"]:
         trace.append(info["fanout_line"])
     gate = info["cond"]
@@ -884,6 +971,9 @@ def normalize_spec(body, spec_id=None):
             "goal": (m.get("goal") or "").strip()[:200],
             "priority": priority,
             "acceptance": _lines(m.get("acceptance"))[:10],
+            # 文档里的「模块划分表」带依赖列：保留下来，分解任务时据此排先后
+            "deps": [d for d in _lines(m.get("deps"))
+                     if re.match(r"^[A-Za-z][A-Za-z0-9_-]{0,63}$", d)][:20],
         })
 
     text = (body.get("body") or "").strip()
@@ -1064,14 +1154,184 @@ def _task_depth(tasks):
     return max([depth(t["id"]) for t in tasks] or [0])
 
 
-def decompose_spec(spec):
-    """设计规格 → (tasks, trace, stats)。
+# 五段式工程阶段：设计 → 编码 → 测试 → 评审 → 交付
+PHASES = ("设计", "编码", "测试", "评审", "交付")
+PHASE_OF = {
+    "foundation": "设计", "design": "设计", "implementation": "编码",
+    "verification": "测试", "review": "评审", "integration": "测试", "delivery": "交付",
+}
 
-    分解规则（可解释）：
-      1. 一条工程骨架任务打头，所有模块任务都依赖它；
-      2. 每个模块一条「功能实现」，P0 或涉及接口的模块再加一条「方案与接口设计」；
-      3. 有验收条款的模块跟一条「验收与回归」；
-      4. 全局约束并入整体验收清单，再收一条「集成联调与整体验收」。
+
+def _module_slug(module):
+    """给文件路径用的稳定短名：优先 ASCII，中文名退回 M1/M2。"""
+    raw = (module.get("name") or "").strip().lower()
+    ascii_part = re.sub(r"[^a-z0-9]+", "-", raw).strip("-")
+    if len(ascii_part) >= 3:
+        return ascii_part[:24]
+    return (module.get("id") or "m1").lower()
+
+
+def _impl_files(module, role):
+    """按角色给出该模块的落地文件——写代码的 Agent 需要明确的落点。"""
+    slug = _module_slug(module)
+    if role == "前端":
+        return ["src/%s/view.js" % slug, "src/%s/style.css" % slug, "tests/test_%s_ui.js" % slug]
+    if role == "运维":
+        return ["deploy/%s.md" % slug, "src/%s/healthcheck.py" % slug]
+    return ["src/%s/service.py" % slug, "src/%s/models.py" % slug, "tests/test_%s.py" % slug]
+
+
+def _impl_how(module, role, acceptance):
+    slug = _module_slug(module)
+    if role == "前端":
+        base = ("原生 JS + SVG 直接操作 DOM，不引入构建链；先写静态结构与样式，"
+                "再接 src/%s/service.py 暴露的接口" % slug)
+    elif role == "运维":
+        base = "写部署说明与健康检查脚本，用 python 跑一次自检"
+    else:
+        base = ("Python 标准库实现：models.py 放数据模型与校验，service.py 放业务逻辑与接口路由，"
+                "不引第三方依赖")
+    if acceptance:
+        base += "；完成后按验收条款逐条自测（取第一条条款写一条用例）"
+    return base
+
+
+def _impl_what(module, acceptance):
+    name = module.get("name") or "模块"
+    goal = (module.get("goal") or "").strip()
+    text = "交付「%s」的可运行实现" % name
+    if goal:
+        text += "：%s" % goal[:80]
+    if acceptance:
+        text += "；满足 %d 条验收（%s）" % (
+            len(acceptance), "；".join(str(a)[:30] for a in acceptance[:2]))
+    return text
+
+
+def _steps_for(kind, module, role, acceptance):
+    """把任务拆成 2-4 个子步骤：每一步都写清"做什么 + 怎么做"。"""
+    slug = _module_slug(module)
+    if kind == "foundation":
+        return [{"title": "建立目录与运行入口", "how": "创建 src/、tests/ 目录与 README，给出启动命令"},
+                {"title": "建立测试基线", "how": "python -m pytest -q 能跑起来（哪怕只有 1 条用例）"}]
+    if kind == "design":
+        return [{"title": "定义接口与数据结构", "how": "写 docs/design-%s.md：接口表、字段表、错误码" % slug},
+                {"title": "对齐验收条款", "how": "逐条映射验收标准到接口或数据结构"}]
+    if kind == "implementation":
+        files = _impl_files(module, role)
+        steps = [{"title": "实现数据模型", "how": "写 %s" % files[1] if len(files) > 1 else "定义数据结构"}]
+        steps.append({"title": "实现业务逻辑与接口", "how": "写 %s" % files[0]})
+        if len(files) > 2:
+            steps.append({"title": "补最小可运行用例", "how": "写 %s 并跑通" % files[-1]})
+        if acceptance:
+            steps.append({"title": "按验收条款自测", "how": "逐条对照：%s" %
+                          str(acceptance[0])[:40]})
+        return steps
+    if kind == "verification":
+        return [{"title": "设计用例矩阵", "how": "正常路径 / 边界 / 异常各至少 1 条"},
+                {"title": "落地测试文件", "how": "写 tests/test_%s.py，用 pytest 断言" % slug},
+                {"title": "跑测试并记录证据", "how": "python -m pytest -q，把通过/失败数写进产物"}]
+    if kind == "review":
+        return [{"title": "对照验收条款检查实现", "how": "逐条读代码，标出未满足项"},
+                {"title": "检查代码质量", "how": "重复逻辑、异常处理、硬编码、越界与注入风险"},
+                {"title": "给出结论", "how": "阻塞问题必须列出，最后给 pass/fail"}]
+    if kind in ("integration", "delivery"):
+        return [{"title": "装配所有模块", "how": "确认入口能同时加载各模块的接口"},
+                {"title": "端到端跑主流程", "how": "python -m pytest -q 跑一遍全量用例"},
+                {"title": "整理交付清单", "how": "列出产出文件、启动方式、遗留风险"}]
+    return [{"title": "执行任务", "how": "按验收标准完成"}]
+
+
+ENDPOINT_RE = re.compile(r"\b(GET|POST|PUT|PATCH|DELETE)\s+(/api/[\w/{}\-.:]+)", re.I)
+TABLE_HEAD_RE = re.compile(r"^\*\*\s*([A-Za-z_][\w]*)\s+([^*]{1,20}?表)\s*\*\*", re.M)
+
+
+def _bigrams(text):
+    text = re.sub(r"[\s，,。.;；:：()（）\[\]/、*_`|-]+", "", text or "")
+    return {text[i:i + 2] for i in range(len(text) - 1)}
+
+
+BOLD_HEAD_RE = re.compile(r"^\*\*\s*([^*]{1,30}?)\s*\*\*\s*$")
+
+
+def _doc_profile(spec):
+    """从规格正文里抽"能变成任务"的证据：接口、数据表、模块细节段。
+
+    这是"节点会随文档变"的关键：没有接口的规格不会凭空长出接口任务；
+    文档里写了几张表、几个接口，任务里就能看到对应的工作项。
+    """
+    body = spec.get("body") or ""
+    endpoints = []
+    recent = ""
+    for line in body.splitlines():
+        mb = BOLD_HEAD_RE.match(line.strip())
+        if mb:
+            recent = mb.group(1)
+        for m in ENDPOINT_RE.finditer(line):
+            path = m.group(2).rstrip(".,;")
+            item = (m.group(1).upper(), path)
+            if item not in [(e[0], e[1]) for e in endpoints]:
+                endpoints.append(item + (recent or path.split("/")[-1],))
+    tables = []
+    for m in TABLE_HEAD_RE.finditer(body):
+        tables.append((m.group(1), m.group(2)))
+    sections = {}
+    for level, head, lines in _doc_sections(body):
+        sections[head] = "\n".join(lines)[:4000]
+    return {"endpoints": endpoints[:12], "tables": tables[:10], "sections": sections}
+
+
+def _doc_sections(text):
+    """(level, title, lines) —— 只需要标题与紧随其后的正文。"""
+    out, cur = [], None
+    for line in text.splitlines():
+        m = re.match(r"^(#{1,6})\s+(.*\S)\s*$", line)
+        if m:
+            cur = (len(m.group(1)), m.group(2).strip(), [])
+            out.append(cur)
+        elif cur is not None:
+            cur[2].append(line)
+    return out
+
+
+def _owner_of(label, modules):
+    """这个接口/表属于哪个模块：模块名命中权重 2，目标描述命中权重 1。"""
+    if not modules:
+        return None
+    lb = _bigrams(label)
+    best, score = None, 0
+    for m in modules:
+        sc = (2 * len(lb & _bigrams(m.get("name") or ""))
+              + len(lb & _bigrams(m.get("goal") or "")))
+        if sc > score:
+            best, score = m, sc
+    return best if score >= 1 else None
+
+
+def _claim(label, modules, used):
+    """一个接口/表只能归一个模块：已经认领过的不再重复分给别的模块。"""
+    owner = _owner_of(label, modules)
+    if owner is None or owner["id"] in used:
+        return None
+    used.add(owner["id"])
+    return owner
+
+
+def _endpoint_label(method, path):
+    return "%s %s" % (method, path)
+
+
+def decompose_spec(spec):
+    """设计规格 → (tasks, trace, stats)：三级结构（阶段 → 任务 → 子步骤）。
+
+    分解规则（可解释、可复现）：
+      P1 设计：工程骨架打头；P0 或涉及接口/数据模型的模块追加「方案与接口设计」
+      P2 编码：每个模块一条「功能实现」，写明目标文件、技术路线、验收条款
+      P3 测试：每个模块一条「单元测试与回归」，要求 pytest 用例矩阵
+      P4 评审：每个模块一条「代码评审」，对照验收条款给结论
+      P5 交付：集成联调 + 交付清单，收所有分支
+    每条任务都带 what（做什么）/ how（怎么做）/ files（落在哪）/ steps（子步骤），
+    `plan_from_tasks` 再把它们变成 DAG 节点。
     """
     modules = [dict(m) for m in (spec.get("modules") or [])]
     constraints = list(spec.get("constraints") or [])
@@ -1091,7 +1351,8 @@ def decompose_spec(spec):
 
     def add(title, module, role, priority, estimate, deps, acceptance=None,
             kind="implementation", out_schema="code-result-v1", acceptance_sources=None,
-            source_label=None):
+            source_label=None, what="", how="", files=None, steps=None, level=2,
+            part=""):
         seq[0] += 1
         module_id = module.get("id") if module else ""
         module_name = module.get("name") if module else ""
@@ -1101,9 +1362,17 @@ def decompose_spec(spec):
         if len(source_refs) < len(criteria):
             fallback = source_label or "%s/derived/%s" % (spec_ref, kind)
             source_refs.extend([fallback] * (len(criteria) - len(source_refs)))
+        phase = PHASE_OF.get(kind, "编码")
         task = {
             "id": "T%d" % seq[0],
             "title": title,
+            "phase": phase,
+            "phase_id": "P%d" % (PHASES.index(phase) + 1),
+            "level": level,
+            "what": what or title,
+            "how": how or "按验收标准实现",
+            "files": list(files or []),
+            "steps": list(steps or _steps_for(kind, module or {}, role, criteria)),
             "module": module_name,
             "module_id": module_id,
             "role": role,
@@ -1117,6 +1386,8 @@ def decompose_spec(spec):
             "spec_hash": spec_fingerprint,
             "kind": kind,
             "out_schema": out_schema,
+            # 任务分组：分解时显式给，没给就按标题/kind 归一
+            "part": part or part_of_task({"title": title, "kind": kind, "what": what}),
             "source": {
                 "spec_id": spec["id"],
                 "revision": spec_rev,
@@ -1129,41 +1400,166 @@ def decompose_spec(spec):
 
     skeleton = add("工程骨架与环境搭建", None, "后端", "P0", 1, [],
                    ["构建脚本可一键起服务", "目录结构与模板、规格存放就位"],
-                   kind="foundation",
+                   kind="foundation", part="skeleton",
+                   what="把项目骨架立起来：目录、入口、测试基线",
+                   how="建 src/、tests/ 目录与 README；确保 python -m pytest -q 能跑",
+                   files=["README.md", "src/__init__.py", "tests/__init__.py"],
                    source_label="%s/derived/engineering-skeleton" % spec["id"])
 
+    # 文档证据 → 归属模块（按接口/表的标题与模块名做字面匹配）
+    profile = _doc_profile(spec)
+    doc_eps, doc_tbls = {}, {}
+    claimed = set()
+    for method, path, label in profile["endpoints"]:
+        owner = _owner_of(label + " " + path.replace("/", " ") + " "
+                          + path.split("/")[-1], modules)
+        if owner:
+            doc_eps[label or path] = (method, path, owner["id"])
+            claimed.add(owner["id"])
+    claimed_tbl = set()
+    for name, label in profile["tables"]:
+        owner = _claim("%s %s" % (name, label), modules, claimed_tbl)
+        if owner:
+            doc_tbls["%s %s" % (name, label)] = (name, owner["id"])
+    if doc_eps or doc_tbls:
+        trace.append("文档证据：%d 个接口、%d 张表，按名称归到相关模块"
+                     % (len(doc_eps), len(doc_tbls)))
+
     design_count = 0
+    data_count = 0
+    api_count = 0
+    review_of = {}
     for m in modules:
         priority = m.get("priority") or "P1"
         acc = list(m.get("acceptance") or [])
         role = _task_role((m.get("name") or "") + " " + (m.get("goal") or ""))
         estimate = TASK_PRIORITY_ESTIMATE.get(priority, 3) + (1 if len(acc) >= 3 else 0)
+        module_ref = "%s/%s" % (spec["id"], m["id"])
+        acc_sources = ["%s/acceptance/%d" % (module_ref, i + 1) for i in range(len(acc))]
 
         deps = [skeleton["id"]]
         if _needs_design(m):
-            module_ref = "%s/%s" % (spec["id"], m["id"])
             design = add("「%s」方案与接口设计" % m["name"], m, "架构师", priority, 2, deps,
                          ["输出接口与数据结构说明", "与规格验收条款逐条对齐"],
-                         kind="design", out_schema="design-v1",
+                         kind="design", part="skeleton", out_schema="design-v1",
+                         what="给出「%s」的接口、数据结构与错误码约定" % m["name"],
+                         how="写 docs/design-%s.md：接口表、字段表、异常分支" % _module_slug(m),
+                         files=["docs/design-%s.md" % _module_slug(m)],
                          acceptance_sources=["%s/derived/design" % module_ref,
                                               "%s/acceptance" % module_ref])
             design_count += 1
             deps = [design["id"]]
 
-        module_ref = "%s/%s" % (spec["id"], m["id"])
-        acc_sources = ["%s/acceptance/%d" % (module_ref, i + 1)
-                       for i in range(len(acc))]
+        # 文档证据：这个模块自己的接口与数据表 → 单独成任务（文档没写就不会有）
+        slug = _module_slug(m)
+        mine_eps = [(method, path) for (method, path, oid) in doc_eps.values()
+                    if oid == m["id"]]
+        mine_tbls = [name for (name, oid) in doc_tbls.values() if oid == m["id"]]
+        if mine_tbls:
+            data = add("「%s」数据模型与迁移" % m["name"], m, "后端", priority,
+                       1 + (1 if len(mine_tbls) > 2 else 0), deps,
+                       ["表结构与规格一致（%s）" % "、".join(mine_tbls[:3]),
+                        "字段类型/约束/索引可落地，迁移脚本可重复执行"],
+                       kind="implementation", part="data", out_schema="code-result-v1",
+                       what="按规格建「%s」的数据模型：%s" % (m["name"], "、".join(mine_tbls)),
+                       how="写 models；建表/改表脚本放 migrations/，含唯一键与外键",
+                       files=["src/models/%s.py" % slug,
+                              "migrations/001_%s.sql" % slug],
+                       steps=[{"title": "建表 %s" % t, "how": "按规格字段表定义类型、约束与索引"}
+                              for t in mine_tbls[:4]]
+                             + [{"title": "迁移可重复执行",
+                                 "how": "写 up/down 脚本并跑两遍，确认幂等"}],
+                       acceptance_sources=["%s/derived/data-model" % module_ref])
+            deps = [data["id"]]
+            data_count += 1
+        if mine_eps:
+            api = add("「%s」接口实现" % m["name"], m, "后端", priority,
+                      1 + (1 if len(mine_eps) > 2 else 0), deps,
+                      ["%s 可调用且返回统一结构" % _endpoint_label(*mine_eps[0])]
+                      + ["错误码与规格一致"],
+                      kind="implementation", part="api", out_schema="code-result-v1",
+                      what="实现「%s」的 %d 个接口：%s"
+                           % (m["name"], len(mine_eps),
+                              "、".join(_endpoint_label(*e) for e in mine_eps[:4])),
+                      how="按规格的请求/响应与错误码实现，入参校验 + 鉴权拦截",
+                      files=["src/api/%s.py" % slug],
+                      steps=[{"title": _endpoint_label(*e), "how": "请求校验 → 业务处理 → 统一返回体"}
+                             for e in mine_eps[:4]]
+                            + [{"title": "接口自测",
+                                "how": "用 curl 或 unittest 打通成功、参数错误、未登录三条分支"}],
+                      acceptance_sources=["%s/derived/api" % module_ref])
+            deps = [api["id"]]
+            api_count += 1
+
         impl = add("「%s」功能实现" % m["name"], m, role, priority, estimate, deps, acc,
-                   kind="implementation", out_schema="code-result-v1",
-                   acceptance_sources=acc_sources)
-        add("「%s」验收与回归" % m["name"], m, "测试", priority,
-            1 + (1 if len(acc) >= 3 else 0), [impl["id"]],
-            acc or ["按规格正文逐条验证"],
-            kind="verification", out_schema="test-v1",
-            acceptance_sources=acc_sources or ["%s/body" % module_ref])
+                   kind="implementation", part="feature", out_schema="code-result-v1",
+                   what=_impl_what(m, acc), how=_impl_how(m, role, acc),
+                   files=_impl_files(m, role), acceptance_sources=acc_sources)
+
+        test = add("「%s」单元测试与回归" % m["name"], m, "测试", priority,
+                   1 + (1 if len(acc) >= 3 else 0), [impl["id"]],
+                   acc or ["按规格正文逐条验证"],
+                   kind="verification", part="test", out_schema="test-v1",
+                   what="为「%s」补用例并跑通：正常 / 边界 / 异常" % m["name"],
+                   how="pytest：tests/test_%s.py，命令 python -m pytest -q" % _module_slug(m),
+                   files=["tests/test_%s.py" % _module_slug(m)],
+                   acceptance_sources=acc_sources or ["%s/body" % module_ref])
+
+        review = add("「%s」代码评审" % m["name"], m, "评审", priority, 1, [test["id"]],
+                     acc or ["实现与验收条款一致"],
+                     kind="review", part="review", out_schema="verify-v1",
+                     what="对照验收条款评审「%s」的实现，给出问题清单与结论" % m["name"],
+                     how="读实现与测试，检查重复逻辑/异常处理/硬编码/越界；阻塞问题必须列出",
+                     files=[], acceptance_sources=acc_sources or ["%s/body" % module_ref])
+        review_of[m["id"]] = review
+
+    # 模块划分表里的依赖列 → 真正的任务依赖：被依赖模块的入口任务先做。
+    # 加边前先查可达性，成环的边直接不加（并在 trace 里记账）。
+    by_id = {t["id"]: t for t in tasks}
+    entry = {}
+    for t in tasks:
+        if not t["module_id"]:
+            continue
+        if t["kind"] in ("design", "implementation"):
+            prev = entry.get(t["module_id"])
+            if prev is None or t["kind"] == "design":
+                entry[t["module_id"]] = t
+
+    def _reaches(src_id, dst_id, seen=None):
+        seen = seen or set()
+        if src_id == dst_id:
+            return True
+        if src_id in seen:
+            return False
+        seen.add(src_id)
+        return any(_reaches(d, dst_id, seen) for d in by_id[src_id].get("depends_on", []) if d in by_id)
+
+    edge_n, cycle_n = 0, 0
+    for m in modules:
+        tgt = entry.get(m.get("id"))
+        if not tgt:
+            continue
+        for dep in (m.get("deps") or []):
+            src = entry.get(dep)
+            if not src or src["id"] == tgt["id"]:
+                continue
+            if src["id"] in tgt["depends_on"]:
+                continue
+            if _reaches(src["id"], tgt["id"]):
+                cycle_n += 1      # 依赖反向成环：丢掉这条，不硬塞
+                continue
+            tgt["depends_on"].append(src["id"])
+            edge_n += 1
+    if edge_n:
+        trace.append("模块依赖落成 %d 条任务先后关系%s"
+                     % (edge_n, "（另有 %d 条成环已丢弃）" % cycle_n if cycle_n else ""))
 
     if design_count:
         trace.append("P0 或涉及接口的模块追加「方案与接口设计」：%d 条" % design_count)
+    if data_count or api_count:
+        trace.append("按文档证据追加：数据模型 %d 条、接口实现 %d 条（没写接口/表的规格不会有这些）"
+                     % (data_count, api_count))
+    trace.append("每个模块固定四段：功能实现 → 单元测试 → 代码评审 → 汇入集成")
     trace.append("实现任务按优先级估时：P0 5 人日 / P1 3 人日 / P2 2 人日，验收条款 ≥3 条再 +1")
 
     tails = [t["id"] for t in tasks
@@ -1173,10 +1569,27 @@ def decompose_spec(spec):
         "%s/derived/integration-e2e" % spec["id"],
         "%s/derived/integration-regression" % spec["id"],
     ] + ["%s/constraints/%d" % (spec["id"], i + 1) for i in range(len(constraints))]
-    add("集成联调与整体验收", None, "测试", "P0", 2, tails, integ_acc,
-        kind="integration", out_schema="test-v1", acceptance_sources=integ_sources)
+    integ = add("集成联调与整体验收", None, "测试", "P0", 2, tails, integ_acc,
+                kind="integration", part="integrate", out_schema="test-v1",
+                what="把所有模块装到一起，跑端到端主流程并回归",
+                how="python -m pytest -q 跑全量用例；按约束逐条核对",
+                files=["tests/test_integration.py"],
+                acceptance_sources=integ_sources)
+    add("交付清单与上线说明", None, "架构师", "P1", 1, [integ["id"]],
+        ["启动方式、配置文件、遗留风险写清楚"],
+        kind="delivery", part="delivery", out_schema="verify-v1",
+        what="输出交付清单：怎么启动、怎么配置、还有哪些风险",
+        how="写 README 的「运行方式」与「已知限制」两节",
+        files=["README.md"],
+        source_label="%s/derived/delivery" % spec["id"])
     if constraints:
         trace.append("%d 条全局约束并入整体验收清单" % len(constraints))
+
+    phases = {}
+    for t in tasks:
+        phases.setdefault(t["phase"], []).append(t["id"])
+    trace.append("阶段划分：" + "；".join("%s %d 条" % (p, len(phases.get(p, [])))
+                                        for p in PHASES if phases.get(p)))
 
     stats = {
         "modules": len(modules),
@@ -1184,9 +1597,13 @@ def decompose_spec(spec):
         "p0": len([t for t in tasks if t["priority"] == "P0"]),
         "estimate": sum(t["estimate"] for t in tasks),
         "depth": _task_depth(tasks),
+        "phases": {p: len(phases.get(p, [])) for p in PHASES},
+        "steps": sum(len(t["steps"]) for t in tasks),
+        "endpoints": len(doc_eps),
+        "tables": len(doc_tbls),
     }
-    trace.append("共 %d 条任务，最长依赖链 %d 层，合计 %d 人日"
-                 % (stats["tasks"], stats["depth"], stats["estimate"]))
+    trace.append("共 %d 条任务 / %d 个子步骤，最长依赖链 %d 层，合计 %d 人日"
+                 % (stats["tasks"], stats["steps"], stats["depth"], stats["estimate"]))
     return {"tasks": tasks, "trace": trace, "stats": stats}
 
 
@@ -1300,7 +1717,8 @@ def _mock_output(n, context=None):
     name = n.get("name") or ""
     schema = n.get("out_schema") or {
         "pm": "prd-v1", "architect": "design-v1",
-        "coder": "code-result-v1", "qa": "verify-v1",
+        "coder": "code-result-v1", "tester": "test-v1", "reviewer": "verify-v1",
+        "qa": "verify-v1",
     }.get(role, "verify-v1")
 
     if schema == "prd-v1":
@@ -1362,15 +1780,8 @@ def _llm_prompt(node, context):
     parts = [
         "你在 AutoFlow 工作流中扮演角色「%s」执行节点「%s」。" % (node.get("role"), node.get("name")),
         "原始需求：" + (context.get("requirement") or "（无）"),
+        "请输出与该节点交付物（%s）一致的 JSON 对象，不要输出多余解释。" % node.get("out_schema", "default"),
     ]
-    if context.get("discussion_prompt"):
-        parts.append(context["discussion_prompt"])
-        parts.append('只输出 JSON 对象，格式为 {"message":"你的本轮意见"}。')
-    else:
-        parts.append("请输出与该节点交付物（%s）一致的 JSON 对象，不要输出多余解释。" %
-                     node.get("out_schema", "default"))
-        if context.get("discussion_context"):
-            parts.append("群体讨论结论与过程（应纳入执行）：\n" + context["discussion_context"])
     deps = context.get("deps") or []
     if deps:
         parts.append("上游节点：" + "、".join(deps))
@@ -1507,9 +1918,11 @@ class Engine:
         self._pool = concurrent.futures.ThreadPoolExecutor(
             max_workers=8, thread_name_prefix="agent")
         self._results = queue.Queue()
+        self._log_q = queue.Queue()          # 工作线程的执行日志，调度线程统一落盘
         self._exec_seq = 0
         # 运行配置在重启后保留（start/reset 不应丢配置）
-        self.cfg = {"speed": 1.0, "demo": True, "qa_mode": "auto", "agent": "mock"}
+        self.cfg = {"speed": 1.0, "demo": True, "qa_mode": "auto",
+                    "agent": "llm" if SETTINGS.public()["active"] else "mock"}
         self.state_store = RunStateStore(RUN_STATE_PATH)
         # 当前运行所绑定的定义（运行时冻结，避免运行中编辑影响执行）
         self.wf = _clone(WORKFLOW)
@@ -1545,7 +1958,6 @@ class Engine:
         run.setdefault("status", "IDLE")
         run.setdefault("nodes", {})
         run.setdefault("edges", [])
-        run.setdefault("discussions", [])
         run.setdefault("events", [])
         run.setdefault("seq", 0)
         run.setdefault("elapsed", 0.0)
@@ -1559,6 +1971,9 @@ class Engine:
         run.setdefault("stats", {"dispatched": 0, "retries": 0, "skipped": 0, "human_waits": 0})
         run.setdefault("demo_node", None)
         run.setdefault("agent", self.cfg.get("agent", "mock"))
+        run.setdefault("mode", "llm" if SETTINGS.public()["active"] else "mock")
+        run.setdefault("workspace", "")
+        run.setdefault("artifacts", [])
         run.setdefault("recovered", False)
         run["_archived"] = False
         return run
@@ -1599,10 +2014,6 @@ class Engine:
             n["executing"] = False
             n.pop("exec_token", None)
             n.pop("exec_started", None)
-        for discussion in self.run.get("discussions", []):
-            if discussion.get("status") == "RUNNING":
-                discussion["status"] = "FAILED"
-                discussion["error"] = "服务中断，未完成的讨论不能自动重放"
         self.run["recovered"] = True
         # 崩溃时流程正卡在人工审批上：没有"结果未知"的节点，就保持原来的等待态，
         # 不应该把一次正常的审批等待变成需要额外 resume 的"待核对"。
@@ -1656,7 +2067,6 @@ class Engine:
             "status": "IDLE",
             "nodes": nodes,
             "edges": [dict(e, active=True) for e in wf["edges"]],
-            "discussions": [],
             "events": [],
             "seq": 0,
             "elapsed": 0.0,
@@ -1669,6 +2079,9 @@ class Engine:
             "concurrency": int(wf.get("concurrency_limit", 3) or 3),
             "stats": {"dispatched": 0, "retries": 0, "skipped": 0, "human_waits": 0},
             "agent": self.cfg.get("agent", "mock"),
+            "mode": "llm" if SETTINGS.public()["active"] else "mock",
+            "workspace": "",
+            "artifacts": [],
             "recovered": False,
         }
         # 演示模式下"首个 Coder 节点首次失败"的落点（生成的工作流也适用）
@@ -1705,6 +2118,7 @@ class Engine:
             if self.run["status"] in ("RUNNING", "PAUSED", "WAITING_HUMAN", "RECONCILING"):
                 return False, "运行进行中，暂不能切换定义"
             self.wf = _clone(definition)
+            annotate_parts(self.wf.get("nodes") or [])
             self._new_run()
             self._emit("workflow.loaded", None,
                        "已载入新草稿 · " + str(self.wf.get("name")))
@@ -1716,27 +2130,34 @@ class Engine:
         with self.lock:
             if self.run["status"] in ("RUNNING", "PAUSED", "WAITING_HUMAN", "RECONCILING"):
                 return False, "运行已在进行中（如需放弃当前运行请先重置）"
-            previous_discussions = (_clone(self.run.get("discussions") or [])
-                                    if self.run["status"] == "IDLE" else [])
             if definition is not None:
                 self.wf = _clone(definition)     # 运行时冻结版本
+                annotate_parts(self.wf.get("nodes") or [])
             self._new_run()
-            node_names = {n["id"]: n.get("name") for n in self.wf.get("nodes", [])}
-            eligible = [
-                d for d in previous_discussions
-                if d.get("status") == "COMPLETE" and node_names.get(d.get("node_id")) == d.get("topic")
-            ]
-            latest = {}
-            for discussion in eligible:
-                latest[discussion["node_id"]] = discussion
-            self.run["discussions"] = list(latest.values())
             self.run["status"] = "RUNNING"
+            self.run["mode"] = "llm" if SETTINGS.public()["active"] else "mock"
+            self._prepare_workspace()
             self.run["started_at"] = time.time()
             self._emit("run.started", None, "运行已启动 · 工作流版本 " + str(self.wf.get("version")))
+            if self.run["mode"] == "llm":
+                self._emit("run.mode", None, "真实模型模式：%s / %s"
+                           % (SETTINGS.data.get("provider"), SETTINGS.data.get("model")))
             self._spawn_loop()
             self.persist()
             self.cond.notify_all()
             return True, "ok"
+
+    def _prepare_workspace(self):
+        """每次运行一个隔离工作区：真实模型在这里落盘代码、跑测试。"""
+        run_id = self.run.get("run_id") or "RUN"
+        path = os.path.join(WORKSPACES_DIR, run_id)
+        try:
+            os.makedirs(path, exist_ok=True)
+            self.run["workspace"] = path
+        except OSError as exc:
+            self.run["workspace"] = ""
+            self.run["mode"] = "mock"
+            self._emit("run.warning", None, "工作区创建失败，退回模拟模式：%s" % exc)
 
     def pause(self):
         with self.lock:
@@ -1783,10 +2204,6 @@ class Engine:
                 if n["status"] not in TERMINAL and n["status"] != "WAITING_HUMAN":
                     self._set_status(n, "CANCELLED", "运行被取消")
             self.run["status"] = "CANCELLED"
-            for discussion in self.run.get("discussions", []):
-                if discussion.get("status") == "RUNNING":
-                    discussion["status"] = "FAILED"
-                    discussion["error"] = "工作流运行已取消"
             self.run["finished_at"] = time.time()
             self._emit("run.cancelled", None, "运行已取消，未开始节点不再派发")
             self._stop.set()
@@ -1888,164 +2305,6 @@ class Engine:
             self.persist()
             self.cond.notify_all()
             return True, "ok"
-
-    def _discussion_by_id(self, discussion_id):
-        return next((d for d in self.run.get("discussions", [])
-                     if d.get("id") == discussion_id), None)
-
-    def _add_discussion_message(self, discussion, role, speaker, content, round_no, kind="agent"):
-        msg = {"speaker": speaker, "role": role, "kind": kind, "round": round_no,
-               "content": content, "ts": round(self.run["elapsed"], 2)}
-        discussion["messages"].append(msg)
-        self._emit("discussion.message", discussion.get("node_id"), speaker + "：" + content[:120])
-
-    def _mock_discussion_round(self, discussion, round_no, guidance=""):
-        title = discussion["topic"]
-        if round_no == 1:
-            replies = [
-                ("pm", "产品经理", "先明确「%s」的目标与验收范围，避免任务边界不清。" % title),
-                ("architect", "架构师", "建议沿用上游产物和现有接口约束，先确定实现方案再拆分细节。"),
-                ("qa", "质量工程师", "验收时应覆盖主要成功路径、异常输入和兼容性风险。"),
-            ]
-        else:
-            guide = guidance[:120]
-            replies = [
-                ("pm", "产品经理", "根据你的引导「%s」，我会相应收紧「%s」的范围和验收重点。" % (guide, title)),
-                ("architect", "架构师", "方案会遵循「%s」，优先复用现有模块，避免额外复杂度。" % guide),
-                ("qa", "质量工程师", "我会把「%s」纳入验收检查，并验证相关边界场景。" % guide),
-            ]
-        for role, speaker, content in replies:
-            self._add_discussion_message(discussion, role, speaker, content, round_no)
-        if round_no == 1:
-            discussion["status"] = "WAITING_GUIDANCE"
-        else:
-            discussion["status"] = "COMPLETE"
-            discussion["conclusion"] = "围绕「%s」协作推进；已纳入人工意见：「%s」" % (
-                title, guidance[:160])
-            self._emit("discussion.completed", discussion.get("node_id"), "讨论已形成结论")
-
-    def _run_llm_discussion_round(self, discussion_id, round_no):
-        participants = [("pm", "产品经理"), ("architect", "架构师"), ("qa", "质量工程师")]
-        if round_no == 2:
-            participants.append(("moderator", "讨论主持人"))
-        for role, speaker in participants:
-            with self.lock:
-                discussion = self._discussion_by_id(discussion_id)
-                if not discussion or discussion.get("status") != "RUNNING":
-                    return
-                node = self.run["nodes"].get(discussion.get("node_id")) or {}
-                transcript = "\n".join(
-                    "%s：%s" % (m["speaker"], m["content"])
-                    for m in discussion.get("messages", [])[-12:])
-                prompt = (
-                    "讨论议题：%s\n当前轮次：%d\n已有讨论：\n%s\n"
-                    "请结合前文，以你的角色提出有实质内容、简洁的本轮意见。"
-                    % (discussion["topic"], round_no, transcript or "（首轮讨论）")
-                )
-                if role == "moderator":
-                    prompt += "\n请总结共识、采纳的人工约束和最终建议，作为本场讨论结论。"
-                ctx = {"requirement": self.run.get("requirement", ""),
-                       "discussion_prompt": prompt, "attempt": round_no}
-                llm_node = {"name": "群体讨论 · " + speaker, "role": role,
-                            "out_schema": "discussion-turn-v1", "timeout": 60}
-            try:
-                result = AGENTS["llm"].run(llm_node, ctx)
-                if not result.ok:
-                    error = (result.error or {}).get("reason") or "模型未能生成讨论发言"
-                    raise RuntimeError(error)
-                content = result.output.get("message") or result.output.get("response")
-                if not isinstance(content, str) or not content.strip():
-                    raise RuntimeError("模型回复缺少 message 字段")
-            except Exception as exc:
-                with self.lock:
-                    discussion = self._discussion_by_id(discussion_id)
-                    if discussion and discussion.get("status") == "RUNNING":
-                        discussion["status"] = "FAILED"
-                        discussion["error"] = str(exc)
-                        self._emit("discussion.failed", discussion.get("node_id"),
-                                   "模型讨论失败：" + str(exc)[:120])
-                        self.persist()
-                        self.cond.notify_all()
-                return
-            with self.lock:
-                discussion = self._discussion_by_id(discussion_id)
-                if not discussion or discussion.get("status") != "RUNNING":
-                    return
-                self._add_discussion_message(discussion, role, speaker, content.strip(), round_no)
-                self.persist()
-                self.cond.notify_all()
-        with self.lock:
-            discussion = self._discussion_by_id(discussion_id)
-            if not discussion or discussion.get("status") != "RUNNING":
-                return
-            if round_no == 1:
-                discussion["status"] = "WAITING_GUIDANCE"
-            else:
-                guidance = next((m["content"] for m in reversed(discussion["messages"])
-                                 if m.get("kind") == "human"), "")
-                discussion["status"] = "COMPLETE"
-                conclusion = next((m["content"] for m in reversed(discussion["messages"])
-                                   if m.get("speaker") == "讨论主持人" and m.get("round") == 2), "")
-                discussion["conclusion"] = conclusion or (
-                    "多角色讨论已完成，并已纳入人工意见：「%s」" % guidance[:160])
-                self._emit("discussion.completed", discussion.get("node_id"), "讨论已形成结论")
-            self.persist()
-            self.cond.notify_all()
-
-    def start_discussion(self, node_id, mode="mock"):
-        with self.lock:
-            node = self.run["nodes"].get(node_id)
-            if not node or node.get("type") != "agent":
-                return False, "只能为 Agent 任务发起讨论", None
-            if mode not in ("mock", "llm"):
-                return False, "未知讨论模式", None
-            discussion = {
-                "id": "DISC-" + uuid.uuid4().hex[:8].upper(),
-                "node_id": node_id,
-                "topic": node.get("name") or node_id,
-                "status": "RUNNING" if mode == "llm" else "WAITING_GUIDANCE",
-                "mode": mode,
-                "messages": [],
-                "conclusion": "",
-            }
-            self.run["discussions"].append(discussion)
-            self._emit("discussion.started", node_id, "已发起多角色讨论：" + discussion["topic"])
-            if mode == "mock":
-                self._mock_discussion_round(discussion, 1)
-            self.persist()
-            self.cond.notify_all()
-            result = _clone(discussion)
-        if mode == "llm":
-            self._pool.submit(self._run_llm_discussion_round, discussion["id"], 1)
-        return True, "ok", result
-
-    def guide_discussion(self, discussion_id, message):
-        if not isinstance(message, str) or not message.strip():
-            return False, "请先填写引导意见", None
-        message = message.strip()
-        if len(message) > 2000:
-            return False, "引导意见不能超过 2000 字", None
-        with self.lock:
-            discussion = next((d for d in self.run.get("discussions", [])
-                               if d.get("id") == discussion_id), None)
-            if not discussion:
-                return False, "讨论不存在", None
-            if discussion.get("status") != "WAITING_GUIDANCE":
-                return False, "当前讨论不能继续引导", None
-            self._add_discussion_message(discussion, "human", "你", message, 2, kind="human")
-            self._emit("discussion.guidance", discussion.get("node_id"),
-                       "收到人工引导：" + message[:120])
-            mode = discussion.get("mode", "mock")
-            if mode == "llm":
-                discussion["status"] = "RUNNING"
-            else:
-                self._mock_discussion_round(discussion, 2, message)
-            self.persist()
-            self.cond.notify_all()
-            result = _clone(discussion)
-        if mode == "llm":
-            self._pool.submit(self._run_llm_discussion_round, discussion_id, 2)
-        return True, "ok", result
 
     def confirm_node(self, node_id):
         """把恢复期 UNCERTAIN 节点核定为成功，**不重复执行**。"""
@@ -2218,6 +2477,55 @@ class Engine:
         return self._begin_agent(n)
 
     # ---------------- Agent 异步执行 ----------------
+    def _ai_for(self, n):
+        """这个节点用哪个 AI：节点显式指定 > 分组默认 > 全局默认。"""
+        known = {a.get("id") for a in (SETTINGS.data.get("ais") or [])}
+        ai = (n.get("ai") or "").strip()
+        if ai in known:
+            return ai
+        part = (n.get("part") or "").strip()
+        mapping = SETTINGS.data.get("part_ais") or {}
+        mapped = (mapping.get(part) or "").strip()
+        return mapped if mapped in known else ""
+
+    def _agent_kind(self, n):
+        """决定这一次节点由谁执行。
+
+        * 显式指定 agent=mock（默认）→ 本地确定性模拟，无密钥也能完整跑通；
+        * 显式指定 agent=llm → 走真实模型（编码/设计/测试/评审用带工具的 ToolAgent）；
+        * 用户保存配置并启用真实模型时，配置写入时会把 agent 切成 llm。
+        """
+        forced = self.cfg.get("agent") or "mock"
+        if forced == "mock":
+            # 例外：这个节点/分组指定了 AI，就按真实模型跑（用户显式指派，不能悄悄忽略）
+            if self._ai_for(n):
+                return "tool" if n.get("role") in ("coder", "architect", "tester",
+                                                   "reviewer") else "llm"
+            return "mock"
+        if n.get("role") in ("coder", "architect", "tester", "reviewer"):
+            return "tool"
+        return "llm"
+
+    def _task_of(self, n):
+        tid = n.get("task_id")
+        for t in (self.run.get("tasks") or []):
+            if t.get("id") == tid:
+                return _clone(t)
+        return {}
+
+    def _upstream_summaries(self, n):
+        """把上游产物摘要带给下游：真实执行时下游需要知道前一步干了什么。"""
+        out = []
+        for dep in (n.get("deps") or [])[:6]:
+            src = self.run["nodes"].get(dep)
+            if not src or not src.get("output"):
+                continue
+            output = src["output"] or {}
+            out.append({"name": src.get("name"),
+                        "summary": output.get("summary") or output.get("design_notes")
+                        or ("%s 个文件" % len(output.get("files") or []))})
+        return out
+
     def _begin_agent(self, n):
         """把一次 Agent 执行交给线程池，结果由调度线程回收。
 
@@ -2229,14 +2537,7 @@ class Engine:
         n["executing"] = True
         n["exec_token"] = token
         n["exec_started"] = self.run["elapsed"]
-        discussion = next((d for d in reversed(self.run.get("discussions", []))
-                           if d.get("node_id") == n["id"] and d.get("status") == "COMPLETE"), None)
-        discussion_context = "\n".join(
-            "%s：%s" % (m.get("speaker"), m.get("content"))
-            for m in (discussion or {}).get("messages", [])
-        )
-        if discussion_context:
-            n["logs"].append("→ 已注入该任务的群体讨论记录作为执行上下文")
+        spec = (self.run.get("definition") or {}).get("spec_snapshot") or {}
         ctx = {
             "node": _clone(n),
             "requirement": self.run.get("requirement", ""),
@@ -2246,16 +2547,48 @@ class Engine:
             "attempt": len(n.get("attempts") or []),
             # 故障注入有副作用（单次模式会自行关闭），每次尝试只求值一次
             "fault": self._injected_failure(n),
-            "agent": self.cfg.get("agent") or "mock",
-            "discussion_context": discussion_context,
+            "agent": self._agent_kind(n),
+            "ai_id": self._ai_for(n),
+            "task": self._task_of(n),
+            "spec": spec,
+            "workspace": self.run.get("workspace") or "",
+            "upstream": self._upstream_summaries(n),
         }
         self._pool.submit(self._run_agent, n["id"], token, ctx)
+
+    def _agent_log(self, node_id, message):
+        """工作线程只往队列里塞日志，落盘统一在调度线程做（避免并发写节点状态）。"""
+        self._log_q.put((node_id, message))
+
+    def _run_tool_agent(self, ctx):
+        node = ctx["node"]
+        ws_dir = ctx.get("workspace") or ""
+        if not ws_dir:
+            return AgentResult.failure(make_error("E-AGENT", "没有可用的运行工作区"))
+        ws = tool_agent.Workspace(ws_dir).ensure()
+        agent = tool_agent.ToolAgent(LLM, SETTINGS.data, ws,
+                                     ai_id=ctx.get("ai_id"),
+                                     log=lambda m: self._agent_log(node["id"], m))
+        try:
+            raw = agent.run(node, ctx)
+        except Exception as exc:
+            return AgentResult.failure(make_error("E-AGENT", "执行器异常：%s" % exc))
+        if raw.get("ok"):
+            return AgentResult.success(raw.get("output") or {})
+        err = raw.get("error") or {}
+        return AgentResult.failure(make_error(err.get("code") or "E-AGENT",
+                                              err.get("reason") or "执行失败"))
 
     def _run_agent(self, node_id, token, ctx):
         """线程池工作线程：只执行，不改引擎状态，结果丢进队列。"""
         try:
-            agent = AGENTS.get(ctx.get("agent") or "mock") or AGENTS["mock"]
-            result = agent.run(ctx["node"], ctx)
+            if ctx.get("fault"):
+                result = AgentResult.failure(ctx["fault"])
+            elif ctx.get("agent") == "tool":
+                result = self._run_tool_agent(ctx)
+            else:
+                agent = AGENTS.get(ctx.get("agent") or "mock") or AGENTS["mock"]
+                result = agent.run(ctx["node"], ctx)
             if not isinstance(result, AgentResult):
                 result = AgentResult.failure(
                     make_error("E-AGENT", "执行器返回了非法结果类型"))
@@ -2266,6 +2599,15 @@ class Engine:
 
     def _drain_results(self):
         """调度线程回收结果；过期结果（已取消/超时/重试）按 token 丢弃。"""
+        # 先把工作线程攒下的执行日志并入节点（工具调用的每一步都能在界面上看到）
+        while True:
+            try:
+                node_id, message = self._log_q.get_nowait()
+            except queue.Empty:
+                break
+            node = self.run["nodes"].get(node_id)
+            if node is not None:
+                node.setdefault("logs", []).append(message)
         while True:
             try:
                 node_id, token, result = self._results.get_nowait()
@@ -2307,6 +2649,35 @@ class Engine:
             n["logs"].append("✗ 执行超时：超过 %s 秒" % int(limit))
             self._fail(n, error)
 
+    def _record_artifacts(self, n, output):
+        """把节点真正落盘的文件登记到运行产物表，供界面查看与验收。"""
+        output = output or {}
+        files = output.get("files") or []
+        ws_dir = self.run.get("workspace") or ""
+        known = {a["path"]: a for a in (self.run.get("artifacts") or [])}
+        for rel in files[:40]:
+            full = os.path.join(ws_dir, str(rel).replace("/", os.sep)) if ws_dir else ""
+            size = 0
+            try:
+                size = os.path.getsize(full) if full else 0
+            except OSError:
+                size = 0
+            known[str(rel)] = {"path": str(rel), "bytes": size,
+                               "node": n["id"], "task_id": n.get("task_id")}
+        self.run["artifacts"] = sorted(known.values(), key=lambda a: a["path"])
+        if files:
+            self._emit("artifact.saved", n["id"], "产出 %d 个文件：%s"
+                       % (len(files), "、".join(str(f) for f in files[:4])))
+        if isinstance(output.get("passed"), int) and isinstance(output.get("total"), int):
+            self._emit("test.result", n["id"], "测试 %d/%d 通过（%s）"
+                       % (output["passed"], output["total"],
+                          output.get("command") or "pytest"))
+            n["logs"].append("测试结果：%d/%d 通过 · %s"
+                             % (output["passed"], output["total"],
+                                output.get("command") or ""))
+            if output.get("output_tail"):
+                n["logs"].append("测试输出尾部：" + str(output["output_tail"])[-600:])
+
     def _apply_agent_result(self, n, result):
         """把执行器结果落成节点状态：schema 校验 → 门禁 → 成功/失败迁移。"""
         role = n.get("role")
@@ -2319,10 +2690,12 @@ class Engine:
 
         if result.ok:
             n["gate"] = {"format": "pass", "compile": "pass" if role == "coder" else "skip",
-                         "review": "pass" if role == "qa" else "skip", "human": "skip"}
+                         "review": "pass" if role in ("qa", "tester", "reviewer") else "skip",
+                         "human": "skip"}
             n["output"] = result.output
             n["attempts"][-1]["result"] = "success"
             n["logs"].append("✓ 输出通过 schema 校验（%s）" % n.get("out_schema", "default"))
+            self._record_artifacts(n, result.output)
             self._emit("gate.result", n["id"], "格式门 / 编译门 / 评审门 全部通过")
             return self._succeed(n, "完成并通过质量门")
 
@@ -2350,7 +2723,10 @@ class Engine:
                 self.run["fail_mode"] = "off"
             return make_error("E-COMPILE", "src/login.py 第 42 行 NameError，依赖未解析",
                               gate={"compile": "fail"})
-        if self.run["demo"] and n["id"] == self.run.get("demo_node") and len(n.get("attempts") or []) == 1:
+        # 演示模式只对模拟执行器生效：真实模型跑任务时不该被"故意失败一次"干扰
+        if (self.run["demo"] and self.run.get("agent", "mock") == "mock"
+                and n["id"] == self.run.get("demo_node")
+                and len(n.get("attempts") or []) == 1):
             return make_error("E-FORMAT", "输出缺少必填字段 files[].sha256",
                               gate={"format": "fail"})
         return None
@@ -2461,6 +2837,12 @@ class Engine:
         old = n["status"]
         n["status"] = status
         n["message"] = message or n["message"]
+        # 跳过/等人工不是"执行成功"，但同样该在日志里留一行，别让日志空白
+        if status in ("SKIPPED", "WAITING_HUMAN") and message:
+            logs = n.setdefault("logs", [])
+            line = ("跳过：%s" % message) if status == "SKIPPED" else ("等待人工：%s" % message)
+            if line not in logs:
+                logs.append(line)
         self._emit("node.status", n["id"], "%s → %s（%s）" % (old, status, message or ""))
 
     def _emit(self, etype, node_id, message):
@@ -2487,14 +2869,15 @@ class Engine:
                         ("run_id", "workflow_id", "workflow_name", "workflow_version", "status",
                          "requirement", "elapsed", "started_at", "finished_at", "speed",
                          "demo", "qa_mode", "fail_mode", "concurrency", "stats", "seq",
-                         "agent", "recovered", "tasks", "spec_id", "spec_revision", "spec_hash")},
+                         "agent", "recovered", "tasks", "spec_id", "spec_revision", "spec_hash",
+                         "mode", "workspace", "artifacts")},
                 "nodes": self._slim_nodes(),
                 "edges": [dict(e) for e in self.run["edges"]],
-                "discussions": _clone(self.run.get("discussions") or []),
                 "events": self.run["events"][-200:],
                 "roles": ROLE_META,
                 "agents": {"current": self.cfg.get("agent", "mock"),
                            "available": sorted(AGENTS.keys())},
+                "settings": SETTINGS.public(),
             }
             if include_workflow:
                 snap["workflow"] = _clone(self.run.get("definition") or self.wf)
@@ -2562,6 +2945,45 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             return {}
 
+    # ---------- 运行工作区（真实落盘的代码） ----------
+    def _workspace_of(self, run_id):
+        """当前运行直接用它自己的工作区；历史运行按约定目录找（工作区不删除）。"""
+        if ENGINE.run.get("run_id") == run_id and ENGINE.run.get("workspace"):
+            return ENGINE.run["workspace"]
+        return os.path.join(WORKSPACES_DIR, run_id)
+
+    def _run_files(self, run_id):
+        ws_dir = self._workspace_of(run_id)
+        live = ENGINE.run if isinstance(ENGINE.run, dict) else {}
+        if live.get("run_id") == run_id:
+            artifacts = live.get("artifacts") or []
+        else:
+            artifacts = (ARCHIVE.get(run_id) or {}).get("artifacts") or []
+        files = []
+        if os.path.isdir(ws_dir):
+            try:
+                files = tool_agent.Workspace(ws_dir).list("", depth=6)
+            except Exception:
+                files = []
+        return self._json({"run_id": run_id,
+                           "workspace": ws_dir if os.path.isdir(ws_dir) else "",
+                           "files": files,
+                           "artifacts": artifacts})
+
+    def _run_file(self, run_id):
+        qs = parse_qs(urlparse(self.path).query)
+        rel = (qs.get("path") or [""])[0]
+        ws_dir = self._workspace_of(run_id)
+        if not os.path.isdir(ws_dir):
+            return self._json({"error": "该运行没有工作区"}, 404)
+        try:
+            data = tool_agent.Workspace(ws_dir).read(rel, limit=200000)
+        except FileNotFoundError:
+            return self._json({"error": "文件不存在：" + rel}, 404)
+        except Exception as exc:
+            return self._json({"error": str(exc)}, 400)
+        return self._json({"ok": True, **data})
+
     # ---------- 路由 ----------
     def do_GET(self):
         path = urlparse(self.path).path
@@ -2582,6 +3004,10 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/runs":
             return self._json({"runs": ARCHIVE.list()})
         parts = [p for p in path.split("/") if p]
+        if len(parts) == 4 and parts[0] == "api" and parts[1] == "runs" and parts[3] == "files":
+            return self._run_files(parts[2])
+        if len(parts) == 4 and parts[0] == "api" and parts[1] == "runs" and parts[3] == "file":
+            return self._run_file(parts[2])
         if len(parts) == 3 and parts[0] == "api" and parts[1] == "runs":
             item = ARCHIVE.get(parts[2])
             if not item:
@@ -2592,6 +3018,11 @@ class Handler(BaseHTTPRequestHandler):
             if not spec:
                 return self._json({"error": "spec not found"}, 404)
             return self._json({"spec": spec})
+        if len(parts) == 3 and parts[0] == "api" and parts[1] == "plan":
+            session = PLANNER.get(parts[2])
+            if not session:
+                return self._json({"ok": False, "message": "规划会话不存在"}, 404)
+            return self._json({"ok": True, "session": session})
         if len(parts) == 3 and parts[0] == "api" and parts[1] == "workflows":
             wf = STORE.get(parts[2])
             if not wf:
@@ -2615,9 +3046,23 @@ class Handler(BaseHTTPRequestHandler):
             return self._stream()
         if path == "/api/agents":
             return self._json({"current": ENGINE.cfg.get("agent", "mock"),
-                               "available": sorted(AGENTS.keys())})
+                               "available": sorted(AGENTS.keys()),
+                               "mode": ENGINE.run.get("mode"),
+                               "settings": SETTINGS.public()})
+        if path == "/api/settings":
+            return self._json({"settings": SETTINGS.public()})
+        if path == "/api/ais":
+            pub = SETTINGS.public()
+            return self._json({"ok": True, "ais": pub["ais"],
+                               "role_ais": pub["role_ais"],
+                               "part_ais": pub["part_ais"],
+                               "primary": pub["primary"],
+                               "presets": pub["presets"],
+                               "parts": [{"id": x["id"], "label": x["label"],
+                                          "color": x["color"]} for x in PARTS]})
         if path == "/api/health":
-            return self._json({"ok": True, "ts": time.time()})
+            return self._json({"ok": True, "ts": time.time(),
+                               "mode": ENGINE.run.get("mode")})
         return self._json({"error": "not found"}, 404)
 
     def do_PUT(self):
@@ -2734,6 +3179,91 @@ class Handler(BaseHTTPRequestHandler):
                            "spec_revision": definition.get("spec_revision"),
                            "spec_hash": definition.get("spec_hash")})
 
+    def _plan_discuss(self, spec_id, body):
+        """开一场多智能体规划讨论：角色各自发言 → 汇总成任务清单。
+
+        讨论本身不动仓库、不动运行，只产出一份"待确认的任务清单"；
+        真正生成工作流要再调 `POST /api/plan/{sid}`（apply），
+        这样"讨论"可以随便重开，不会污染当前草稿。
+        """
+        spec = SPECS.get(spec_id)
+        if not spec:
+            return self._json({"ok": False, "message": "规格不存在"}, 404)
+        pub = SETTINGS.public()
+        if not pub.get("any_active"):
+            return self._json({"ok": False, "code": "E-AGENT",
+                               "message": "多智能体讨论需要真实模型：点右上角「模拟」"
+                                          "填入 Base URL 与 API Key 并勾选「使用真实模型执行」"}, 400)
+        modules = spec.get("modules") or []
+        if not modules and not (spec.get("body") or "").strip():
+            return self._json({"ok": False,
+                               "message": "规格里既没有模块也没有正文，没什么可讨论的"}, 400)
+        role_ais = dict(SETTINGS.data.get("role_ais") or {})
+        role_ais.update({str(k): str(v) for k, v in (body.get("role_ais") or {}).items()
+                         if v})
+        session = PLANNER.start(spec, body.get("template") or "default",
+                                {"role_ais": role_ais})
+        return self._json({"ok": True, "session_id": session["id"],
+                           "session": PLANNER.get(session["id"])})
+
+    def _plan_apply(self, sid, body):
+        """把讨论产出的任务清单编排成 DAG 并落库为当前草稿。"""
+        session = PLANNER.get(sid)
+        if not session:
+            return self._json({"ok": False, "message": "规划会话不存在"}, 404)
+        if session["status"] == "running":
+            return self._json({"ok": False, "message": "讨论还没结束"}, 409)
+        if session["status"] != "done" or not session["tasks"]:
+            err = (session.get("error") or {}).get("message") or session.get("stage")
+            return self._json({"ok": False,
+                               "message": "这次讨论没有产出可用任务：%s" % (err or "未知原因")},
+                              409)
+        consensus = session.get("consensus") or {}
+        if consensus.get("status") == "blocked" and not session.get("human_decision"):
+            return self._json({"ok": False, "code": "E-CONSENSUS",
+                               "consensus": consensus,
+                               "message": "讨论没达成共识（%s）。请先「接受当前清单」或让相关角色继续讨论"
+                                          % "；".join(consensus.get("unresolved") or [])[:160]},
+                              409)
+        if ENGINE.run["status"] not in ("IDLE", "SUCCESS", "FAILED", "CANCELLED"):
+            return self._json({"ok": False, "message": "运行进行中，暂不能重建草稿"}, 409)
+        spec = SPECS.get(session["spec_id"]) or {}
+        if not spec:
+            return self._json({"ok": False, "message": "规格已被删除"}, 404)
+        wid = STORE.default_id()
+        wf = STORE.get(wid) if wid else None
+        if not wf:
+            return self._json({"ok": False, "message": "仓库中没有工作流"}, 404)
+
+        template = body.get("template") or session.get("template") or "default"
+        tasks = session["tasks"]
+        try:
+            definition, meta = plan_from_tasks(spec, tasks, template)
+        except TemplateError as exc:
+            return self._json({"ok": False, "message": str(exc)}, 400)
+        ok, errors, warnings, stats = validate_workflow(definition)
+        if not ok:
+            return self._json({"ok": False, "message": "讨论产出的任务编排成的图未通过校验",
+                               "errors": errors}, 500)
+
+        draft, err = STORE.save_draft(wid, definition, name=definition["name"],
+                                      requirement=definition["requirement"], dirty=False)
+        if err:
+            return self._json({"ok": False, "message": err}, 404)
+        ENGINE.load(definition)
+        return self._json({"ok": True,
+                           "message": "已按 AI 讨论结果编排 %d 条任务" % len(tasks),
+                           "draft": draft, "tasks": tasks,
+                           "trace": meta["trace"] + session.get("trace", []),
+                           "stats": stats, "warnings": warnings,
+                           "template": meta["template"],
+                           "discussion": {"session_id": sid,
+                                          "minutes": len(session["minutes"]),
+                                          "fixes": session.get("fixes") or [],
+                                          "usage": session.get("usage") or {}},
+                           "spec_revision": definition.get("spec_revision"),
+                           "spec_hash": definition.get("spec_hash")})
+
     def _preview_spec(self, spec_id, body):
         """只读预演：把规格编排成 DAG 交给前端画在画布上，不写仓库、不动草稿与版本。
 
@@ -2814,6 +3344,69 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/specs":
             return self._create_spec(body)
+        if path == "/api/specs/import":
+            try:
+                parsed = spec_import.parse_any(body.get("text") or "", body.get("name") or "")
+            except Exception as exc:
+                return self._json({"ok": False, "message": "解析失败：%s" % exc}, 400)
+            return self._json({"ok": True, "spec": parsed})
+        if path == "/api/settings/clear-key":
+            SETTINGS.clear_key(body.get("ai_id"))
+            return self._json({"ok": True, "cleared": True,
+                               "settings": SETTINGS.public()})
+        if path == "/api/ais":
+            res = SETTINGS.upsert_ai(body or {})
+            return self._json({"ok": True, "ai": res, "settings": SETTINGS.public()})
+        if path == "/api/assign":
+            mapping = {}
+            for scope in ("role_ais", "part_ais"):
+                if isinstance(body.get(scope), dict):
+                    merged = dict(SETTINGS.data.get(scope) or {})
+                    for k, v in body[scope].items():
+                        if v:
+                            merged[str(k)] = str(v)
+                        else:
+                            merged.pop(str(k), None)
+                    mapping[scope] = merged
+            if mapping:
+                SETTINGS.save(mapping)
+            return self._json({"ok": True, "settings": SETTINGS.public()})
+        if (len(parts) == 4 and parts[0] == "api" and parts[1] == "ais"
+                and parts[3] == "delete"):
+            SETTINGS.delete_ai(parts[2])
+            return self._json({"ok": True, "settings": SETTINGS.public()})
+        if (len(parts) == 4 and parts[0] == "api" and parts[1] == "ais"
+                and parts[3] == "probe"):
+            try:
+                res = LLM.probe(parts[2])
+            except Exception as exc:
+                return self._json({"ok": False,
+                                   "code": getattr(exc, "code", "E-AGENT"),
+                                   "message": str(exc)}, 400)
+            return self._json({"ok": True, "probe": res, "settings": SETTINGS.public()})
+        if path == "/api/settings":
+            patch = dict(body or {})
+            if patch.pop("clear_key", False):
+                SETTINGS.clear_key(patch.pop("ai_id", None))
+                return self._json({"ok": True, "cleared": True,
+                                   "settings": SETTINGS.public()})
+            # 空字符串 = "不改密钥"，避免前端回填掩码时把真 key 覆盖掉
+            elif "api_key" in patch and not str(patch.get("api_key") or "").strip():
+                patch.pop("api_key")
+            SETTINGS.save(patch)
+            active = SETTINGS.public()["active"]
+            ENGINE.configure(agent="llm" if active else "mock")
+            return self._json({"ok": True, "settings": SETTINGS.public()})
+        if path == "/api/settings/probe":
+            try:
+                res = LLM.probe()
+            except Exception as exc:
+                # 探测失败是"诊断结果"，不是请求错误：回 200 + ok:false，
+                # 前端照样能显示原因，浏览器控制台也不会多一条 400。
+                return self._json({"ok": False, "code": getattr(exc, "code", "E-AGENT"),
+                                   "message": str(exc),
+                                   "settings": SETTINGS.public()})
+            return self._json({"ok": True, "probe": res, "settings": SETTINGS.public()})
         if (len(parts) == 4 and parts[0] == "api" and parts[1] == "specs"
                 and parts[3] == "decompose"):
             return self._decompose_spec(parts[2])
@@ -2823,16 +3416,28 @@ class Handler(BaseHTTPRequestHandler):
         if (len(parts) == 4 and parts[0] == "api" and parts[1] == "specs"
                 and parts[3] == "plan"):
             return self._plan_spec(parts[2], body)
+        if (len(parts) == 4 and parts[0] == "api" and parts[1] == "specs"
+                and parts[3] == "discuss"):
+            return self._plan_discuss(parts[2], body)
+        if (len(parts) == 4 and parts[0] == "api" and parts[1] == "plan"
+                and parts[3] == "say"):
+            res = PLANNER.say(parts[2], body.get("text") or "", body.get("to") or "")
+            return self._json(res, 200 if res.get("ok") else 404)
+        if (len(parts) == 4 and parts[0] == "api" and parts[1] == "plan"
+                and parts[3] == "decide"):
+            res = PLANNER.decide(parts[2], body.get("action") or "accept",
+                                 body.get("note") or "")
+            return self._json(res, 200 if res.get("ok") else 400)
+        if (len(parts) == 4 and parts[0] == "api" and parts[1] == "plan"
+                and parts[3] == "cancel"):
+            ok = PLANNER.cancel(parts[2])
+            return self._json({"ok": ok, "session": PLANNER.get(parts[2])},
+                              200 if ok else 404)
+        if (len(parts) == 3 and parts[0] == "api" and parts[1] == "plan"
+                and parts[2]):
+            return self._plan_apply(parts[2], body)
         if path == "/api/workflows/generate":
             return self._generate(body)
-        if path == "/api/discussions":
-            ok, msg, discussion = ENGINE.start_discussion(body.get("node_id"), body.get("mode", "mock"))
-            return self._json({"ok": ok, "message": msg, "discussion": discussion},
-                              200 if ok else 400)
-        if len(parts) == 4 and parts[0] == "api" and parts[1] == "discussions" and parts[3] == "guide":
-            ok, msg, discussion = ENGINE.guide_discussion(parts[2], body.get("message"))
-            return self._json({"ok": ok, "message": msg, "discussion": discussion},
-                              200 if ok else 400)
         if path == "/api/run/start":
             if body.get("speed") is not None:
                 ENGINE.configure(speed=body["speed"])
@@ -2934,9 +3539,6 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"ok": False, "message": "unknown action"}, 404)
             return self._json({"ok": ok, "message": msg}, 200 if ok else 409)
 
-        if len(parts) == 3 and parts[0] == "api" and parts[1] == "discussions":
-            return self._json({"ok": False, "message": "unknown discussion action"}, 404)
-
         return self._json({"ok": False, "message": "not found"}, 404)
 
     # ---------- SSE ----------
@@ -2985,7 +3587,6 @@ class Handler(BaseHTTPRequestHandler):
                                  "concurrency", "stats", "seq", "agent", "recovered")},
                         "nodes": ENGINE._slim_nodes(),
                         "edges": [dict(e) for e in ENGINE.run["edges"]],
-                        "discussions": _clone(ENGINE.run.get("discussions") or []),
                         "events": events[-40:],
                     }
                 if ver != last_ver or events:

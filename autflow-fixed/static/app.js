@@ -28,8 +28,10 @@ const RUN_STATUS = {
 
 const NODE_TYPES = ['start', 'agent', 'condition', 'approval', 'end'];
 const NODE_ROLES = ['system', 'pm', 'architect', 'coder', 'qa', 'human'];
+const PHASE_ORDER = ['设计', '编码', '测试', '评审', '交付'];
 
 const NW = 200, NH = 62, GAPX = 56, GAPY = 52, PAD = 44;
+const PHASE_GAP = 32, PHASE_PAD = 18, PHASE_ROW_GAP = 38;
 
 const app = {
   wf: null, roles: {}, nodes: [], edges: [], run: {}, runId: null,
@@ -44,14 +46,13 @@ const app = {
   versionDefs: {},         // 版本号 → 已发布定义
   runWorkflow: null,       // 运行中快照所绑定的定义
   frozen: false, histId: null,   // 历史回看：冻结实时刷新
-  discussions: [],
-  discussionMode: 'mock',
-  discussionDraft: '',
   def: null, defKey: '', dirty: false, errors: [],
   specs: [], specId: null, specModules: [], tasks: [],   // 设计规格 → 任务清单
   specTemplate: null,      // 规格面板选中的流程模板（标准 SE / 敏捷精简 / 企业合规）
   // 分解预览：把"规格编排出来的图"临时画在画布上（只读、不落库），退出即还原
-  preview: null, previewMode: 'view', specNewFrom: null
+  preview: null, previewMode: 'view', specNewFrom: null,
+  ais: [], parts: [], partMeta: {},   // 多 AI 接入点 + 任务分组（颜色/名称）
+  taskPhaseOpen: {},
 };
 
 /* ------------------------------------------------------------------ utils */
@@ -137,8 +138,112 @@ function clearNetError() {
 }
 
 /* ---------------------------------------------------------------- layout */
+function workflowPhaseGroups(wf) {
+  const tasks = wf.tasks || [];
+  const taskById = {};
+  const nodeByTask = {};
+  tasks.forEach(t => { taskById[t.id] = t; });
+  (wf.nodes || []).forEach(n => {
+    if (n.task_id && taskById[n.task_id]) nodeByTask[n.task_id] = n;
+  });
+  const byPhase = {};
+  tasks.forEach(t => {
+    const node = nodeByTask[t.id];
+    if (!node) return;
+    const phase = t.phase || '编码';
+    (byPhase[phase] = byPhase[phase] || { phase, tasks: [], nodes: [] }).tasks.push(t);
+    byPhase[phase].nodes.push(node);
+  });
+  const phases = PHASE_ORDER.filter(p => byPhase[p])
+    .concat(Object.keys(byPhase).filter(p => PHASE_ORDER.indexOf(p) < 0));
+  return phases.map(phase => byPhase[phase]);
+}
+
+function computePhaseLayout(wf, groups) {
+  const nodes = wf.nodes || [];
+  if (!groups.length) return null;
+  const nodeById = {};
+  const incoming = {}, outgoing = {};
+  nodes.forEach(n => {
+    nodeById[n.id] = n;
+    incoming[n.id] = [];
+    outgoing[n.id] = [];
+  });
+  (wf.edges || []).forEach(e => {
+    if (!outgoing[e.source] || !incoming[e.target]) return;
+    outgoing[e.source].push(e.target);
+    incoming[e.target].push(e.source);
+  });
+
+  const rank = {};
+  const taskNodeIds = new Set();
+  groups.forEach((group, i) => group.nodes.forEach(n => {
+    rank[n.id] = i;
+    taskNodeIds.add(n.id);
+  }));
+  nodes.forEach(n => {
+    if (n.type === 'start') rank[n.id] = -1;
+    if (n.type === 'end') rank[n.id] = groups.length;
+  });
+  for (let pass = 0; pass < nodes.length; pass++) {
+    let changed = false;
+    nodes.forEach(n => {
+      if (rank[n.id] != null) return;
+      const prev = incoming[n.id].map(id => rank[id]).filter(r => r >= 0 && r < groups.length);
+      const next = outgoing[n.id].map(id => rank[id]).filter(r => r >= 0 && r < groups.length);
+      if (prev.length) {
+        rank[n.id] = Math.max.apply(null, prev);
+        changed = true;
+      } else if (next.length) {
+        rank[n.id] = Math.min.apply(null, next);
+        changed = true;
+      }
+    });
+    if (!changed) break;
+  }
+  nodes.forEach(n => { if (rank[n.id] == null) rank[n.id] = 0; });
+
+  const pos = {};
+  const phaseX = PAD + (nodes.some(n => rank[n.id] === -1) ? NW + PHASE_GAP : 0);
+  const phaseWidth = NW + PHASE_PAD * 2;
+  const phaseStep = phaseWidth + PHASE_GAP;
+  const rowStep = NH + PHASE_ROW_GAP;
+  let maxRows = 1;
+  groups.forEach((group, i) => {
+    const items = nodes.filter(n => rank[n.id] === i);
+    maxRows = Math.max(maxRows, items.length);
+    items.forEach((n, row) => {
+      pos[n.id] = {
+        x: phaseX + i * phaseStep + PHASE_PAD,
+        y: PAD + 42 + row * rowStep
+      };
+    });
+  });
+  const startNodes = nodes.filter(n => rank[n.id] === -1);
+  const endNodes = nodes.filter(n => rank[n.id] === groups.length);
+  startNodes.forEach((n, row) => {
+    pos[n.id] = { x: PAD, y: PAD + 42 + row * rowStep };
+  });
+  const endX = phaseX + groups.length * phaseStep;
+  const lastPhaseRight = phaseX + (groups.length - 1) * phaseStep + phaseWidth;
+  endNodes.forEach((n, row) => {
+    pos[n.id] = { x: endX, y: PAD + 42 + row * rowStep };
+  });
+  const auxRows = Math.max(startNodes.length, endNodes.length);
+  maxRows = Math.max(maxRows, auxRows);
+  const worldW = endNodes.length ? endX + NW + PAD : lastPhaseRight + PAD;
+  const worldH = PAD * 2 + 42 + maxRows * NH + Math.max(0, maxRows - 1) * PHASE_ROW_GAP;
+  return { pos, worldW: Math.max(worldW, 760), worldH, depth: rank };
+}
+
 function computeLayout(wf) {
   const nodes = wf.nodes, edges = wf.edges;
+  const groups = workflowPhaseGroups(wf);
+  const hasSavedPositions = nodes.some(n =>
+    n.pos && typeof n.pos.x === 'number' && typeof n.pos.y === 'number');
+  if (groups.length && !hasSavedPositions) {
+    return computePhaseLayout(wf, groups);
+  }
   const indeg = {}, adj = {};
   nodes.forEach(n => { indeg[n.id] = 0; adj[n.id] = []; });
   edges.forEach(e => { if (adj[e.source] && e.target in indeg) { adj[e.source].push(e.target); indeg[e.target]++; } });
@@ -197,6 +302,12 @@ function defKey(def) {
 }
 
 function edgePath(s, t) {
+  if (t.x > s.x + 12) {
+    const sx = s.x + NW, sy = s.y + NH / 2;
+    const tx = t.x, ty = t.y + NH / 2;
+    const dx = Math.max(30, (tx - sx) * 0.42);
+    return `M ${sx} ${sy} C ${sx + dx} ${sy}, ${tx - dx} ${ty}, ${tx - 4} ${ty}`;
+  }
   const sx = s.x + NW / 2, sy = s.y + NH;
   const tx = t.x + NW / 2, ty = t.y;
   const dy = Math.max(30, (ty - sy) * 0.42);
@@ -217,6 +328,7 @@ function buildGraph(wf) {
 
   const edgeLayer = $('#edgeLayer'), nodeLayer = $('#nodeLayer');
   edgeLayer.innerHTML = ''; nodeLayer.innerHTML = '';
+  drawPhaseGroups(wf, pos);
   app.nodeEls = {}; app.edgeEls = {};
 
   wf.edges.forEach((e) => {
@@ -247,6 +359,11 @@ function buildGraph(wf) {
     el('rect', { class: 'outline', x: -4, y: -4, width: NW + 8, height: NH + 8, rx: 15 }, g);
     el('rect', { class: 'node-bg', x: 0, y: 0, width: NW, height: NH, rx: 12 }, g);
     el('rect', { class: 'role-bar', x: 0, y: 9, width: 4, height: NH - 18, rx: 2, fill: roleColor(n.role) }, g);
+    if (n.part) {
+      const pm = partMeta(n.part);
+      el('rect', { class: 'part-strip', x: 10, y: 0, width: NW - 20, height: 3,
+                   rx: 1.5, fill: pm.color, 'fill-opacity': 0.9 }, g);
+    }
     el('rect', { class: 'state-strip', x: 1, y: NH - 16, width: NW - 2, height: 15, rx: 4, fill: '#94a3b8' }, g);
 
     const name = el('text', { class: 'n-name', x: 16, y: 25 }, g);
@@ -308,6 +425,48 @@ function buildGraph(wf) {
   if (app.needFit) { app.needFit = false; fit(); }
 }
 
+function drawPhaseGroups(wf, positions) {
+  const layer = $('#phaseLayer');
+  if (!layer) return;
+  layer.innerHTML = '';
+  const groups = workflowPhaseGroups(wf).map((group, index) => {
+    const xs = group.nodes.map(n => positions[n.id] && positions[n.id].x).filter(Number.isFinite);
+    const ys = group.nodes.map(n => positions[n.id] && positions[n.id].y).filter(Number.isFinite);
+    if (!xs.length || !ys.length) return null;
+    const x = Math.min.apply(null, xs) - PHASE_PAD;
+    const y = Math.min.apply(null, ys) - 38;
+    const right = Math.max.apply(null, xs) + NW + PHASE_PAD;
+    const bottom = Math.max.apply(null, ys) + NH + PHASE_PAD;
+    return {
+      phase: group.phase, count: group.tasks.length, index,
+      x, y, width: right - x, height: bottom - y
+    };
+  }).filter(Boolean);
+  const overlapping = new Set();
+  groups.forEach((a, i) => groups.slice(i + 1).forEach((b, j) => {
+    if (a.x < b.x + b.width && a.x + a.width > b.x
+        && a.y < b.y + b.height && a.y + a.height > b.y) {
+      overlapping.add(i);
+      overlapping.add(i + j + 1);
+    }
+  }));
+  const colors = ['#0ea5e9', '#2563eb', '#14b8a6', '#a855f7', '#64748b'];
+  groups.forEach((group, i) => {
+    if (overlapping.has(i)) return;
+    const color = colors[group.index % colors.length];
+    el('rect', {
+      class: 'phase-box', 'data-phase': group.phase, 'data-task-count': group.count,
+      x: group.x, y: group.y, width: group.width, height: group.height, rx: 15,
+      fill: color, 'fill-opacity': 0.045, stroke: color,
+      'stroke-opacity': 0.55, 'stroke-width': 1.5, 'stroke-dasharray': '6 4'
+    }, layer);
+    const label = el('text', {
+      class: 'phase-label', x: group.x + 12, y: group.y + 21, fill: color
+    }, layer);
+    label.textContent = `阶段${group.index + 1} · ${group.phase} · ${group.count}项任务`;
+  });
+}
+
 /* ---------------------------------------------------------------- render */
 function render() {
   syncCanvas();
@@ -318,7 +477,6 @@ function render() {
   renderRail();
   renderHud();
   renderDetail();
-  renderDiscussion();
   renderBanner();
   $('#stEvents').textContent = app.run.seq || 0;
   $('#canvas').classList.toggle('editable', isEditable());
@@ -552,6 +710,61 @@ function renderRail() {
     const s = legend.querySelector(`.cnt[data-k="${k}"]`);
     if (s) s.textContent = c[k] || 0;
   });
+  renderPhaseTasks();
+}
+
+function renderPhaseTasks() {
+  const listEl = $('#phaseTaskList');
+  if (!listEl) return;
+  const openPhases = Object.assign({}, app.taskPhaseOpen);
+  listEl.querySelectorAll('details[data-phase]').forEach(group => {
+    openPhases[group.dataset.phase] = group.open;
+  });
+  app.taskPhaseOpen = openPhases;
+
+  const tasks = taskRows();
+  const count = $('#taskListCount');
+  const completed = tasks.filter(t => {
+    const status = taskStatus(t);
+    return status === 'SUCCESS' || status === 'SKIPPED';
+  }).length;
+  if (count) count.textContent = tasks.length ? `${completed}/${tasks.length}` : '';
+  if (!tasks.length) {
+    listEl.innerHTML = '<div class="phase-task-empty">当前流程暂无阶段任务</div>';
+    return;
+  }
+
+  const groups = {};
+  tasks.forEach(t => {
+    const phase = t.phase || '编码';
+    (groups[phase] = groups[phase] || []).push(t);
+  });
+  const phases = PHASE_ORDER.filter(phase => groups[phase])
+    .concat(Object.keys(groups).filter(phase => PHASE_ORDER.indexOf(phase) < 0));
+  listEl.innerHTML = phases.map((phase, index) => {
+    const phaseTasks = groups[phase];
+    const phaseIndex = PHASE_ORDER.indexOf(phase) + 1;
+    const open = Object.prototype.hasOwnProperty.call(openPhases, phase)
+      ? openPhases[phase] : true;
+    const rows = phaseTasks.map(t => {
+      const status = taskStatus(t);
+      const statusMeta = STATUS[status] || STATUS.PENDING;
+      const node = taskNodeFor(t.id);
+      const selected = node && node.id === app.selected;
+      return `<button type="button" class="phase-task-row${selected ? ' selected' : ''}"`
+        + ` data-task-id="${esc(t.id)}" onclick="focusTask(this.dataset.taskId)"`
+        + ` title="${esc(t.title || t.id)}">`
+        + `<span class="phase-task-main"><span class="phase-task-id">${esc(t.id)}</span>`
+        + `<span class="phase-task-name">${esc(t.title || t.id)}</span></span>`
+        + `<span class="phase-task-status" style="--task-status:${statusMeta.color}">${statusMeta.label}</span>`
+        + '</button>';
+    }).join('');
+    return `<details class="phase-task-group" data-phase="${esc(phase)}"${open ? ' open' : ''}>`
+      + `<summary><span class="phase-dot p${phaseIndex || index + 1}"></span>`
+      + `<span class="phase-task-phase">${esc(phase)}</span>`
+      + `<span class="phase-task-total">${phaseTasks.length}</span></summary>`
+      + `<div class="phase-task-items">${rows}</div></details>`;
+  }).join('');
 }
 
 function renderHud() {
@@ -602,16 +815,33 @@ function showDetailTab() {
   tabs.forEach(x => x.classList.toggle('active', x.dataset.tab === 'detail'));
   $('#paneDetail').hidden = false;
   $('#paneTimeline').hidden = true;
-  $('#paneDiscussion').hidden = true;
+  if ($('#paneFiles')) $('#paneFiles').hidden = true;
 }
 
 function selectNode(id) {
+  if (app.nodeEdit && app.nodeEdit !== id) app.nodeEdit = null;
   app.selected = id;
   app.selEdge = null;
   showDetailTab();
   renderNodes();
   renderEdges();
+  renderPhaseTasks();
   renderDetail(true);
+}
+
+function focusTask(taskId) {
+  const node = taskNodeFor(taskId);
+  if (!node) {
+    toast('该任务尚未生成画布节点', true);
+    return;
+  }
+  selectNode(node.id);
+  const pos = app.pos[node.id];
+  if (pos) {
+    app.vb.x = pos.x + NW / 2 - app.vb.w / 2;
+    app.vb.y = pos.y + NH / 2 - app.vb.h / 2;
+    applyVB();
+  }
 }
 function selectEdge(key) {
   app.selEdge = key;
@@ -619,6 +849,7 @@ function selectEdge(key) {
   showDetailTab();
   renderNodes();
   renderEdges();
+  renderPhaseTasks();
   renderDetail(true);
 }
 
@@ -646,9 +877,17 @@ function renderDetail(force) {
   const pane = $('#paneDetail');
   if (app.selEdge) return renderEdgeDetail(pane);
   // 编辑态以定义为准（可能是运行快照里还没有的新节点）
-  const dnode = (app.mode === 'edit' && app.def && app.selected)
+  const draftNode = (app.def && app.selected)
     ? app.def.nodes.find(x => x.id === app.selected) : null;
-  const n = dnode || (app.selected ? app.nodeById[app.selected] : null);
+  const snapNode = app.selected ? app.nodeById[app.selected] : null;
+  const dnode = app.mode === 'edit' ? draftNode : null;
+  // 视图态：运行状态/产物/日志以快照为准，名称与配置以草稿为准——
+  // 否则刚改完的节点名要等下一次运行才会显示
+  const n = dnode || (snapNode && draftNode ? Object.assign({}, snapNode, {
+    name: draftNode.name, role: draftNode.role, type: draftNode.type,
+    deps: draftNode.deps, max_retries: draftNode.max_retries,
+    expression: draftNode.expression,
+  }) : (snapNode || draftNode));
   if (!n) {
     pane.innerHTML = app.mode === 'edit'
       ? '<div class="empty">编辑态：点击节点修改属性，从节点底部圆点拖到另一个节点即可连线。</div>'
@@ -660,6 +899,7 @@ function renderDetail(force) {
   if (!force && pane.dataset.node === n.id && pane.contains(document.activeElement)) return;
   pane.dataset.node = n.id;
 
+  if (app.nodeEdit === n.id) return renderNodeEditor(pane, n);
   if (app.mode === 'edit') return renderInspector(pane, n);
 
   const meta = STATUS[n.status] || STATUS.PENDING;
@@ -673,7 +913,9 @@ function renderDetail(force) {
                <button class="btn warn" onclick="doRetry('${n.id}')">重新执行</button>
                <button class="btn ghost" onclick="doSkip('${n.id}')">跳过</button>`;
   } else if (n.status === 'WAITING_HUMAN' && n.type === 'approval') {
-    actions = `<input id="apComment" class="ap-input" placeholder="审批意见（可选，会记入运行历史）">
+    actions = `<input id="apComment" class="ap-input" value="${esc(app.apComment || '')}"
+                      oninput="app.apComment = this.value"
+                      placeholder="审批意见（可选，会记入运行历史）">
                <div class="ap-btns">
                  <button class="btn primary" onclick="doApprove('${n.id}','approve')">批准上线</button>
                  <button class="btn danger" onclick="doApprove('${n.id}','reject')">打回修改</button>
@@ -714,7 +956,10 @@ function renderDetail(force) {
 
   pane.innerHTML = `
     <div class="detail-head">
-      <div class="dh-name">${esc(n.name)}</div>
+      <div class="dh-top">
+        <div class="dh-name">${esc(n.name)}</div>
+        ${nodeEditButton(n)}
+      </div>
       <div class="dh-sub">
         <span class="mono">${esc(n.id)}</span>
         <span class="role-tag" style="background:${roleColor(n.role)}">${esc(roleLabel(n.role))}</span>
@@ -731,115 +976,227 @@ function renderDetail(force) {
     <div class="section-title">质量门</div>
     <div class="chips">${gateChips(n)}</div>
     <div class="section-title">执行说明</div>
-    <div style="font-size:12px;color:#475569">${esc(n.message || '—')}</div>
+    ${n.message
+      ? `<div class="task-prose">${esc(n.message)}</div>`
+      : `<div class="pending-box">${esc(pendingWhy(n))}</div>`}
     ${taskBlock(n)}
     ${ap}
     ${n.expression ? `<div class="section-title">判定表达式</div>
       <div class="mono" style="background:#f8fafc;border:1px solid var(--line);border-radius:8px;padding:7px 10px">${esc(n.expression)}${
         n.branch_taken ? `　→ 命中 <b style="color:${n.branch_taken === 'true' ? '#16a34a' : '#b45309'}">${n.branch_taken.toUpperCase()}</b>` : ''}</div>` : ''}
-    <div class="section-title">输出摘要</div>
-    ${n.output ? `<pre class="output">${jsonHTML(n.output)}</pre>` : '<div class="empty" style="padding:14px">尚未产生产物</div>'}
+    <div class="section-title">产出内容</div>
+    ${n.output ? outputBlock(n.output) : pendingOutputBlock(n)}
     ${attTable}
     <div class="section-title">执行日志</div>
-    <ul class="logs">${(n.logs || []).map(l => `<li>${esc(l)}</li>`).join('') || '<li>暂无日志</li>'}</ul>
+    ${(n.logs || []).length
+      ? `<ul class="logs">${n.logs.map(l => `<li>${esc(l)}</li>`).join('')}</ul>`
+      : `<div class="pending-box">${esc(pendingWhy(n, true))}</div>`}
     ${actions ? `<div class="actions">${actions}</div>` : ''}
-    ${!app.frozen && n.type === 'agent'
-      ? `<div class="actions"><button class="btn primary" onclick="openDiscussion('${esc(n.id)}')">查看 / 发起群体讨论</button></div>`
-      : ''}
   `;
 }
 
-function renderDiscussion() {
-  const pane = $('#paneDiscussion');
-  if (!pane) return;
-  const node = app.selected && app.nodeById[app.selected];
-  if (!node || node.type !== 'agent') {
-    pane.innerHTML = '<div class="empty">先在画布选择一个 Agent 任务，再查看或发起讨论。</div>';
-    return;
+/* ---------------------------------------------------- 单个节点的就地编辑 */
+function nodeEditButton(n) {
+  if (app.frozen) return '<span class="panel-note">历史回看只读</span>';
+  if (app.run.status && app.run.status !== 'IDLE') {
+    return '<span class="panel-note">运行中：先重置运行再改节点</span>';
   }
-  const discussion = (app.discussions || []).slice().reverse()
-    .find(d => d.node_id === node.id);
-  if (pane.contains(document.activeElement) &&
-      document.activeElement.matches('#discussionGuide')) return;
-  if (!discussion) {
-    pane.innerHTML = `<div class="discussion-head"><span class="discussion-title">${esc(node.name)}</span></div>
-      <div class="empty">这个任务还没有讨论记录。</div>
-      ${app.frozen ? '' : `<div class="discussion-start">
-        <label for="discussionMode">讨论模式</label>
-        <select id="discussionMode" class="select sm">
-          <option value="mock"${app.discussionMode === 'mock' ? ' selected' : ''}>离线演示</option>
-          <option value="llm"${app.discussionMode === 'llm' ? ' selected' : ''}>LLM 模型</option>
-        </select>
-        <div class="panel-note">LLM 模式需先配置模型服务环境变量。</div>
-        <button class="btn primary" onclick="startDiscussion('${esc(node.id)}', $('#discussionMode').value)">发起群体讨论</button>
-      </div>`}`;
-    return;
+  if (app.viewVersion !== 'draft') return '<span class="panel-note">已发布版本只读</span>';
+  return `<button class="btn sm primary" onclick="beginNodeEdit()" title="只改这一个节点，写进草稿">编辑此节点</button>`;
+}
+
+function deleteNodeInline() {
+  if (!app.def) return;
+  if (app.nodeEdit) {
+    const was = app.mode;
+    app.mode = 'edit';
+    deleteSelection();
+    app.mode = was;
   }
-  const messages = (discussion.messages || []).map(m => `
-    <div class="discussion-msg ${m.kind === 'human' ? 'human' : ''}">
-      <div class="who">${esc(m.speaker)}<span class="discussion-round">第 ${m.round} 轮</span></div>
-      <div class="body">${esc(m.content)}</div>
-    </div>`).join('');
-  const guide = discussion.status === 'WAITING_GUIDANCE' && !app.frozen
-    ? `<div class="discussion-guide">
-        <label class="section-title" for="discussionGuide">补充意见，引导下一轮</label>
-        <textarea id="discussionGuide" rows="3" maxlength="2000"
-          placeholder="例如：优先复用现有模块，不新增依赖">${esc(app.discussionDraft || '')}</textarea>
-        <button class="btn primary" onclick="guideDiscussion('${esc(discussion.id)}')">发送意见并继续</button>
-      </div>` : '';
-  const conclusion = discussion.conclusion
-    ? `<div class="discussion-conclusion"><b>讨论结论</b><div>${esc(discussion.conclusion)}</div>
-       <small>该结论会在对应 Agent 执行时作为上下文。</small></div>` : '';
-  pane.innerHTML = `<div class="discussion-head">
-      <span class="discussion-title">${esc(discussion.topic)}</span>
-      <span class="discussion-mode">${discussion.mode === 'llm' ? 'LLM 模型' : '离线演示'}</span>
+  app.nodeEdit = null;
+  renderDetail(true);
+}
+
+function beginNodeEdit() {
+  if (!app.selected) { toast('先在画布上点一个节点', true); return; }
+  if (!app.def) { toast('编辑器还没就绪', true); return; }
+  app.nodeEdit = app.selected;
+  renderDetail(true);
+}
+
+function endNodeEdit(force) {
+  app.nodeEdit = null;
+  if (force) renderDetail(true); else render();
+}
+
+function editTaskField(tid, field, val) {
+  const t = ((app.def && app.def.tasks) || []).find(x => x.id === tid);
+  if (!t) return;
+  if (field === 'files') {
+    t.files = String(val).split(/[\n,]/).map(x => x.trim()).filter(Boolean);
+  } else if (field === 'acceptance') {
+    t.acceptance = String(val).split('\n').map(x => x.trim()).filter(Boolean);
+  } else if (field === 'steps') {
+    t.steps = String(val).split('\n').map(line => {
+      const parts = line.split('|');
+      return { title: (parts[0] || '').trim(), how: (parts[1] || '').trim() };
+    }).filter(x => x.title || x.how);
+  } else if (field === 'estimate') {
+    t.estimate = Math.max(1, Math.min(60, +val || 1));
+  } else {
+    t[field] = val;
+  }
+  const node = (app.def.nodes || []).find(x => x.task_id === tid);
+  if (node && field === 'title') {
+    node.name = val;
+    const g = app.nodeEls[node.id];
+    if (g && g.__name) g.__name.textContent = truncate(val, 13);
+  }
+  app.defKey = defKey(app.def);
+  markDirty();
+  renderPhaseTasks();
+}
+
+function renderNodeEditor(pane, n) {
+  const d = (app.def.nodes || []).find(x => x.id === n.id) || n;
+  const t = d.task_id ? ((app.def.tasks || []).find(x => x.id === d.task_id) || null) : null;
+  const typeOpts = NODE_TYPES.map(x =>
+    `<option value="${x}"${d.type === x ? ' selected' : ''}>${x}</option>`).join('');
+  const roleOpts = NODE_ROLES.map(r =>
+    `<option value="${r}"${d.role === r ? ' selected' : ''}>${roleLabel(r)}</option>`).join('');
+  const stepsText = (t && t.steps || []).map(st => (st.title || '') + (st.how ? ' | ' + st.how : '')).join('\n');
+  pane.innerHTML = `
+    <div class="detail-head">
+      <div class="dh-top">
+        <div class="dh-name">编辑：${esc(d.name)}</div>
+        <button class="btn sm" onclick="endNodeEdit(true)">完成</button>
+      </div>
+      <div class="dh-sub"><span class="mono">${esc(d.id)}</span>
+        <span>只改这一个节点 · 改动写进草稿，点「保存草稿」生效</span></div>
     </div>
-    <div class="discussion-messages">${messages}</div>
-    ${discussion.status === 'RUNNING' ? '<div class="discussion-status">智能体正在讨论…</div>' : ''}
-    ${discussion.error ? `<div class="discussion-error">${esc(discussion.error)}</div>` : ''}
-    ${guide}${conclusion}
-    <div class="panel-note">状态：${esc({
-      RUNNING: '讨论中', WAITING_GUIDANCE: '等待人工引导',
-      COMPLETE: '已完成', FAILED: '执行失败'
-    }[discussion.status] || discussion.status)}</div>`;
+    <div class="insp">
+      <div class="insp-row"><label>名称</label>
+        <input value="${esc(d.name || '')}" oninput="editNode('${d.id}','name',this.value)"></div>
+      <div class="insp-row"><label>类型</label>
+        <select onchange="editNode('${d.id}','type',this.value)">${typeOpts}</select></div>
+      <div class="insp-row"><label>角色</label>
+        <select onchange="editNode('${d.id}','role',this.value)">${roleOpts}</select></div>
+      <div class="insp-row"><label>重试上限</label>
+        <input type="number" min="0" max="9" value="${d.max_retries == null ? 0 : d.max_retries}"
+               oninput="editNode('${d.id}','max_retries',Math.max(0,Math.min(9,+this.value||0)))"></div>
+      ${d.type === 'condition' ? `<div class="insp-row"><label>判定表达式</label>
+        <input value="${esc(d.expression || '')}" placeholder="qa_score >= 80"
+               oninput="editNode('${d.id}','expression',this.value)"></div>` : ''}
+      <div class="insp-row"><label>前置依赖</label>
+        <div class="insp-hint">${esc((d.deps || []).join('、') || '无')}（由连线维护）</div></div>
+    </div>
+    ${t ? `
+    <div class="section-title">任务内容（会一起保存）</div>
+    <div class="insp">
+      <div class="insp-row"><label>任务标题</label>
+        <input value="${esc(t.title || '')}" onchange="editTaskField('${t.id}','title',this.value)"></div>
+      <div class="insp-row"><label>阶段</label>
+        <select onchange="editTaskField('${t.id}','phase',this.value)">${PHASE_ORDER.map(p =>
+          `<option value="${p}"${t.phase === p ? ' selected' : ''}>${p}</option>`).join('')}</select></div>
+      <div class="insp-row"><label>优先级</label>
+        <select onchange="editTaskField('${t.id}','priority',this.value)">${['P0', 'P1', 'P2'].map(p =>
+          `<option value="${p}"${t.priority === p ? ' selected' : ''}>${p}</option>`).join('')}</select></div>
+      <div class="insp-row"><label>预估人日</label>
+        <input type="number" min="1" max="60" value="${t.estimate == null ? 1 : t.estimate}"
+               onchange="editTaskField('${t.id}','estimate',this.value)"></div>
+      <div class="insp-row col"><label>做什么</label>
+        <textarea rows="3" onchange="editTaskField('${t.id}','what',this.value)"
+          placeholder="这条任务要产出什么">${esc(t.what || '')}</textarea></div>
+      <div class="insp-row col"><label>怎么做</label>
+        <textarea rows="3" onchange="editTaskField('${t.id}','how',this.value)"
+          placeholder="用什么实现、写哪个文件、跑什么命令">${esc(t.how || '')}</textarea></div>
+      <div class="insp-row col"><label>落点文件</label>
+        <input value="${esc((t.files || []).join(', '))}"
+               onchange="editTaskField('${t.id}','files',this.value)"
+               placeholder="src/auth.py, tests/test_auth.py"></div>
+      <div class="insp-row col"><label>子步骤</label>
+        <textarea rows="3" onchange="editTaskField('${t.id}','steps',this.value)"
+          placeholder="每行一步：标题 | 做法">${esc(stepsText)}</textarea></div>
+      <div class="insp-row col"><label>验收条款</label>
+        <textarea rows="3" onchange="editTaskField('${t.id}','acceptance',this.value)"
+          placeholder="每行一条可验证的验收">${esc((t.acceptance || []).join('\n'))}</textarea></div>
+    </div>` : ''}
+    <div class="actions">
+      <button class="btn primary" onclick="doSave()">保存草稿</button>
+      <button class="btn" onclick="endNodeEdit(true)">完成编辑</button>
+      <button class="btn danger" onclick="deleteNodeInline()">删除该节点</button>
+    </div>
+    <div class="insp-hint">改完保存后，画布与运行都按新内容执行；不想留就点「完成编辑」再刷新页面。</div>`;
 }
 
-function openDiscussion(nodeId) {
-  app.selected = nodeId;
-  $$('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === 'discussion'));
-  $('#paneDetail').hidden = true;
-  $('#paneTimeline').hidden = true;
-  $('#paneDiscussion').hidden = false;
-  renderDiscussion();
-}
-
-async function startDiscussion(nodeId, mode) {
-  try {
-    mode = mode || app.discussionMode || 'mock';
-    const r = await api('/api/discussions', { node_id: nodeId, mode });
-    if (!r.ok) return;
-    app.discussionMode = mode;
-    openDiscussion(nodeId);
-    await refresh();
-  } catch (e) {
-    toast('发起讨论失败：' + (e && e.message ? e.message : e), true);
+/* 没执行过的节点：把"为什么是空的"讲清楚，而不是留一片空白 */
+function pendingWhy(n, forLogs) {
+  const st = n.status || 'PENDING';
+  if (st === 'SKIPPED') {
+    return forLogs
+      ? '该节点没有执行（' + (n.message || '条件分支未命中') + '），所以没有日志。'
+      : '该节点没有执行：' + (n.message || '条件分支未命中');
   }
+  if (st === 'BLOCKED') return '上游没有成功，这个节点被阻断，还没轮到它执行。';
+  if (st === 'READY' || st === 'RUNNING') {
+    return forLogs ? '正在执行，日志会陆续出现在这里。' : '正在执行…';
+  }
+  if (st === 'FAILED') return '执行失败，详情见上方错误块。';
+  return forLogs
+    ? '还没运行：点右上角「启动运行」，跑完这个节点就会写日志。'
+    : '还没运行：点右上角「启动运行」，跑完这里会写它实际做了什么。';
 }
 
-async function guideDiscussion(discussionId) {
-  const input = $('#discussionGuide');
-  const message = input ? input.value.trim() : '';
-  if (!message) { toast('请先填写引导意见', true); return; }
-  if (input) input.blur();
-  try {
-    const r = await api(`/api/discussions/${encodeURIComponent(discussionId)}/guide`, { message });
-    if (!r.ok) return;
-    app.discussionDraft = '';
-    toast('已加入人工意见，讨论已形成结论');
-    await refresh();
-  } catch (e) {
-    toast('提交意见失败：' + (e && e.message ? e.message : e), true);
+/* 没产出时显示"预计产出"：协议、角色、落点文件、验收条款 —— 有事可看，不是空白 */
+function pendingOutputBlock(n) {
+  const t = n.task_id ? ((app.def && app.def.tasks) || []).find(x => x.id === n.task_id) : null;
+  const rows = [];
+  if (n.out_schema) rows.push(['预计产物', `<span class="mono">${esc(n.out_schema)}</span>`]);
+  rows.push(['执行角色', esc(roleLabel(n.role))]);
+  if (t && (t.files || []).length) {
+    rows.push(['落点文件', t.files.map(f => `<div class="mono">${esc(f)}</div>`).join('')]);
   }
+  if (t && (t.acceptance || []).length) {
+    rows.push(['要满足的验收', t.acceptance.map(a => `<div>· ${esc(a)}</div>`).join('')]);
+  }
+  return `<div class="pending-box">${esc(pendingWhy(n))}</div>
+    <div class="kv out-kv">${rows.map(([k, v]) => `<div><span>${k}</span><b>${v}</b></div>`).join('')}</div>`;
+}
+
+/* 产出内容：先按类型给人看，再给原始 JSON */
+function outputBlock(o) {
+  if (!o || typeof o !== 'object') return `<pre class="output">${esc(String(o))}</pre>`;
+  const rows = [];
+  const push = (k, v) => { if (v !== undefined && v !== null && v !== '') rows.push([k, v]); };
+  if (o.artifact) push('产物协议', `<span class="mono">${esc(o.artifact)}</span>`);
+  if (o.summary) push('摘要', esc(String(o.summary)));
+  if (o.decision) push('人工决定', `<b>${esc(String(o.decision))}</b>`);
+  if (o.approver) push('处理人', esc(String(o.approver)));
+  if (o.comment) push('意见', esc(String(o.comment)));
+  if (o.loc != null) push('代码行数', esc(String(o.loc)) + ' 行');
+  if (o.passed != null || o.total != null) {
+    const p = o.passed == null ? '—' : o.passed, t = o.total == null ? '—' : o.total;
+    push('测试结果', `${p} / ${t} 通过`);
+  }
+  if (o.command) push('测试命令', `<span class="mono">${esc(String(o.command))}</span>`);
+  if (o.merged != null) push('已合并', o.merged ? '是' : '否');
+  if (o.security_score != null) push('安全评分', esc(String(o.security_score)));
+  if (Array.isArray(o.files) && o.files.length) {
+    push('产物文件', o.files.map(f => `<div class="mono">${esc(typeof f === 'string' ? f : (f.path || JSON.stringify(f)))}</div>`).join(''));
+  }
+  if (Array.isArray(o.acceptance_results) && o.acceptance_results.length) {
+    push('验收结果', o.acceptance_results.map(r =>
+      `<div class="${r.status === 'pass' ? 'acc-pass' : (r.status === 'fail' ? 'acc-fail' : '')}">${
+        r.status === 'pass' ? '✓ ' : (r.status === 'fail' ? '✗ ' : '· ')}${esc(r.criterion || '')}</div>`).join(''));
+  }
+  const table = rows.length
+    ? `<div class="kv out-kv">${rows.map(([k, v]) => `<div><span>${k}</span><b>${v}</b></div>`).join('')}</div>`
+    : '<div class="empty" style="padding:10px">这条产出没有可读摘要，展开看原始 JSON</div>';
+  const tail = o.output_tail
+    ? `<div class="section-title">原始输出（尾部）</div><pre class="output">${esc(String(o.output_tail).slice(0, 2000))}</pre>` : '';
+  return `${table}${tail}
+    <details class="raw-json"><summary>原始 JSON</summary>
+      <pre class="output">${jsonHTML(o)}</pre></details>`;
 }
 
 function renderInspector(pane, n) {
@@ -940,6 +1297,44 @@ function removeTaskForNode(node) {
     }));
 }
 
+/* 这个节点用哪个 AI：空 = 按分组/默认 */
+function aiSelectHTML(n) {
+  if (!app.ais.length) return '默认 AI<span class="muted">（未接入其它 AI）</span>';
+  const editable = isEditable();
+  return `<select class="select sm" ${editable ? '' : 'disabled'}`
+    + ` onchange="setNodeAI('${esc(n.id)}', this.value)">`
+    + aiOptions(n.ai || '', '（按分组 / 默认）') + '</select>';
+}
+
+function setNodeAI(id, aiId) {
+  const n = app.def && (app.def.nodes || []).find(x => x.id === id);
+  if (!n) return;
+  n.ai = aiId || '';
+  markDirty();
+  renderDetail(true);
+  toast(aiId ? '这个节点改用 ' + aiId : '这个节点改回默认 AI');
+}
+
+function partSelectHTML(n) {
+  const editable = isEditable();
+  const opts = app.parts.map(p =>
+    `<option value="${esc(p.id)}"${p.id === n.part ? ' selected' : ''}>${esc(p.label)}</option>`);
+  if (!n.part) opts.unshift('<option value="" selected>（未分组）</option>');
+  return `<select class="select sm" ${editable ? '' : 'disabled'}`
+    + ` onchange="setNodePart('${esc(n.id)}', this.value)">${opts.join('')}</select>`;
+}
+
+function setNodePart(id, partId) {
+  const n = app.def && (app.def.nodes || []).find(x => x.id === id);
+  if (!n) return;
+  n.part = partId || '';
+  n.part_label = partMeta(partId).label;
+  markDirty();
+  renderCanvas();
+  renderDetail(true);
+  toast('已归到「' + partMeta(partId).label + '」');
+}
+
 function taskBlock(n) {
   const list = taskRows();
   if (!list.length) return '';
@@ -948,10 +1343,23 @@ function taskBlock(n) {
     <div class="section-title">任务信息</div>
     <div class="kv">
       <div><span>任务</span><b>${esc(t.id)} · ${esc(t.module || '—')}</b></div>
-      <div><span>规格出处</span><b>${taskRefHTML(t)}</b></div>
+      <div><span>阶段 / 角色</span><b>${esc(t.phase || '—')} · ${esc(t.role || '—')}</b></div>
       <div><span>优先级</span><b>${esc(t.priority || '—')}</b></div>
       <div><span>预估</span><b>${t.estimate} 人日</b></div>
+      <div><span>规格出处</span><b>${taskRefHTML(t)}</b></div>
+      <div><span>执行器</span><b>${esc(t.agent || '—')}${t.kind ? ' · ' + esc(t.kind) : ''}</b></div>
+      <div><span>任务分组</span><b>${partSelectHTML(n)}</b></div>
+      <div><span>执行 AI</span><b>${aiSelectHTML(n)}</b></div>
     </div>
+    ${t.what ? `<div class="section-title">做什么</div>
+      <div class="task-prose">${esc(t.what)}</div>` : ''}
+    ${t.how ? `<div class="section-title">怎么做</div>
+      <div class="task-prose">${esc(t.how)}</div>` : ''}
+    ${(t.files || []).length ? `<div class="section-title">落点文件</div>
+      <div class="chips">${t.files.map(f => `<span class="chip file">${esc(f)}</span>`).join('')}</div>` : ''}
+    ${(t.steps || []).length ? `<div class="section-title">子步骤（${t.steps.length}）</div>
+      <ol class="step-list">${t.steps.map(st => `<li><b>${esc(st.title || '')}</b>${
+        st.how ? '<span>' + esc(st.how) + '</span>' : ''}</li>`).join('')}</ol>` : ''}
     <div class="section-title">验收条款</div>
     <div class="task-acceptance">${taskAcceptanceHTML(t)}</div>` : '';
   if (!isPmNode(n) && !t) return info;
@@ -1019,13 +1427,15 @@ function applySnapshot(s) {
     return;
   }
   app.roles = s.roles || {};
+  if (s.settings) { app.settings = s.settings; renderModeChip(); }
   if (s.workflow) { app.wf = s.workflow; app.runWorkflow = s.workflow; }
 
   app.run = s.run || {};
   app.runId = app.run.run_id || app.runId;
+  renderModeChip();
+  renderFileBadge();
   app.nodes = s.nodes || [];
   app.edges = s.edges || [];
-  app.discussions = s.discussions || [];
   app.nodeById = {};
   app.nodes.forEach(n => app.nodeById[n.id] = n);
 
@@ -1062,13 +1472,14 @@ function applyPatch(p) {
   }
 
   app.run = Object.assign({}, app.run, p.run || {});
+  renderModeChip();
+  renderFileBadge();
   if (p.nodes) {
     app.nodes = p.nodes;
     app.nodeById = {};
     app.nodes.forEach(n => app.nodeById[n.id] = n);
   }
   if (p.edges) app.edges = p.edges;
-  if (p.discussions) app.discussions = p.discussions;
   if (p.events && p.events.length) {
     app.lastSeq = Math.max(app.lastSeq, p.events[p.events.length - 1].seq);
     appendEvents(p.events);
@@ -1257,6 +1668,7 @@ function onPointerUp(ev) {
     if (moved) {
       const n = app.def.nodes.find(x => x.id === id);
       if (n) n.pos = { x: Math.round(app.pos[id].x), y: Math.round(app.pos[id].y) };
+      drawPhaseGroups(app.def, app.pos);
       app.defKey = defKey(app.def);
       markDirty();
     }
@@ -1394,6 +1806,7 @@ function editNode(id, field, val) {
 
 /* ------------------------------------------------------------ 版本操作 */
 function setMode(on) {
+  app.nodeEdit = null;
   if (on) {
     if (app.run.status !== 'IDLE') { toast('运行中不可编辑，请先重置', true); $('#tglEdit').checked = false; return; }
     if (app.viewVersion !== 'draft') {
@@ -1534,7 +1947,8 @@ async function doReset() {
 }
 async function doApprove(id, decision) {
   const box = $('#apComment');
-  const comment = box ? String(box.value || '').trim() : '';
+  const comment = String((box ? box.value : app.apComment) || '').trim();
+  app.apComment = '';           // 提交后清空，避免带到下一个审批节点
   const r = await api(`/api/nodes/${id}/approval`, { decision, comment });
   if (r && r.ok === false) toast(r.message || '审批未执行', true);
   else { toast(decision === 'approve' ? '已批准，流程继续' : '已打回，等待修改'); refresh(); }
@@ -1670,20 +2084,12 @@ function bindUI() {
 
   $$('.tab').forEach(t => t.onclick = () => {
     $$('.tab').forEach(x => x.classList.toggle('active', x === t));
-    $('#paneDetail').hidden = t.dataset.tab !== 'detail';
-    $('#paneTimeline').hidden = t.dataset.tab !== 'timeline';
-    $('#paneDiscussion').hidden = t.dataset.tab !== 'discussion';
-    if (t.dataset.tab === 'discussion') renderDiscussion();
-  });
-  $('#paneDiscussion').addEventListener('input', (e) => {
-    if (e.target && e.target.id === 'discussionGuide') {
-      app.discussionDraft = e.target.value;
-    }
-  });
-  $('#paneDiscussion').addEventListener('change', (e) => {
-    if (e.target && e.target.id === 'discussionMode') {
-      app.discussionMode = e.target.value;
-    }
+    const tab = t.dataset.tab;
+    $('#paneDetail').hidden = tab !== 'detail';
+    $('#paneTimeline').hidden = tab !== 'timeline';
+    const files = $('#paneFiles');
+    if (files) files.hidden = tab !== 'files';
+    if (tab === 'files') loadRunFiles();
   });
 
   document.addEventListener('keydown', (e) => {
@@ -1709,6 +2115,7 @@ function bindUI() {
 
 /* --------------------------------------------------------- 设计规格（spec） */
 function openSpec() {
+  syncDiscussUI();
   if (app.frozen) { toast('历史回看中，先点「返回当前」', true); return; }
   $('#specPanel').hidden = false;
   $('#reqPanel').hidden = true;
@@ -1802,6 +2209,7 @@ function renderSpec(spec) {
   $('#specSummary').value = spec.summary || '';
   $('#specBody').value = spec.body || '';
   $('#specConstraints').value = (spec.constraints || []).join('\n');
+  syncConstraintCount();
   app.specModules = (spec.modules || []).map(m => ({
     id: m.id || '', name: m.name || '', goal: m.goal || '',
     priority: m.priority || 'P1', acceptance: m.acceptance || []
@@ -1847,6 +2255,7 @@ function newSpec() {
   $('#specSummary').value = '';
   $('#specBody').value = '';
   $('#specConstraints').value = '';
+  syncConstraintCount();
   $('#specMeta').textContent = '新规格（尚未保存）';
   $('#specNote').textContent = '';
   clearTasks();
@@ -2041,28 +2450,69 @@ async function cancelPreview(opts) {
   return true;
 }
 
-function renderTasks(r) {
-  const tasks = r.tasks || [], stats = r.stats || {};
-  $('#specDecomp').hidden = false;
-  $('#specStats').textContent = `${stats.modules} 模块 · ${stats.tasks} 条任务 · ` +
-    `${stats.estimate} 人日 · 最长 ${stats.depth} 层`;
-  $('#specTrace').innerHTML = (r.trace || [])
-    .map(t => `<div class="trace-line">· ${esc(t)}</div>`).join('');
-  const rows = tasks.map(t => `
-    <tr>
+function taskRowHTML(t) {
+  const files = (t.files || []).map(f => `<span class="tc-file">${esc(f)}</span>`).join('');
+  const steps = (t.steps || []).map(s =>
+    `<li><b>${esc(s.title || '')}</b> — ${esc(s.how || '')}</li>`).join('');
+  const detail = steps
+    ? `<details><summary>展开 ${(t.steps || []).length} 个子步骤</summary><ol>${steps}</ol></details>`
+    : '';
+  return `<tr>
       <td class="tt-state">待编排</td>
       <td class="tt-id">${esc(t.id)}</td>
-      <td class="tt-title">${esc(t.title)}</td>
+      <td class="tt-title">${esc(t.title)}
+        ${t.module ? `<div class="muted" style="font-size:10.5px">${esc(t.module)}</div>` : ''}
+        ${t.part ? `<div><span class="part-tag" style="border-color:${esc(partMeta(t.part).color)}66;`
+          + `color:${esc(partMeta(t.part).color)}">${esc(partMeta(t.part).label)}</span>`
+          + `${t.ai ? `<span class="ai-tag">🤖 ${esc(t.ai)}</span>` : ''}</div>` : ''}</td>
       <td class="tt-role">${esc(t.role)}</td>
       <td class="tt-deps">${esc((t.depends_on || []).join(',') || '—')}</td>
       <td class="tt-est">${t.estimate}</td>
+      <td class="tt-what">
+        <div class="tc-what"><b>做什么：</b>${esc(t.what || '')}</div>
+        <div class="tc-how"><b>怎么做：</b>${esc(t.how || '')}</div>
+        ${files ? `<div class="tc-files">${files}</div>` : ''}
+        ${detail}
+      </td>
       <td class="tt-acc">${taskAcceptanceHTML(t)}</td>
       <td class="tt-source">${taskRefHTML(t)}</td>
-    </tr>`).join('');
+    </tr>`;
+}
+
+function renderTasks(r) {
+  const tasks = r.tasks || [], stats = r.stats || {};
+  $('#specDecomp').hidden = false;
+  const ph = stats.phases || {};
+  $('#specStats').textContent =
+    `${stats.modules} 模块 · ${stats.tasks} 条任务 · ${stats.steps || 0} 个子步骤 · `
+    + `${stats.estimate} 人日 · 最长 ${stats.depth} 层`;
+  const phText = PHASE_ORDER.filter(p => ph[p]).map(p => `${p} ${ph[p]}`).join(' · ');
+  $('#specTrace').innerHTML = (r.trace || [])
+    .map(t => `<div class="trace-line">· ${esc(t)}</div>`).join('')
+    + (phText ? `<div class="trace-line">· 阶段：${esc(phText)}</div>` : '');
+
+  // 按阶段分组：阶段 → 任务 → 子步骤，三层都在这一张表里
+  const groups = {};
+  tasks.forEach(t => {
+    const p = t.phase || '编码';
+    (groups[p] = groups[p] || []).push(t);
+  });
+  const order = PHASE_ORDER.filter(p => groups[p])
+    .concat(Object.keys(groups).filter(p => PHASE_ORDER.indexOf(p) < 0));
+  let rows = '';
+  order.forEach(p => {
+    const idx = PHASE_ORDER.indexOf(p) + 1;
+    const days = groups[p].reduce((a, t) => a + (t.estimate || 0), 0);
+    rows += `<tr class="tt-phase"><td colspan="9">
+        <span class="phase-dot p${idx}"></span>${esc(p)}阶段
+        <span class="muted">· ${groups[p].length} 条 · ${days} 人日</span>
+      </td></tr>`;
+    groups[p].forEach(t => { rows += taskRowHTML(t); });
+  });
   $('#specTasks').innerHTML =
     '<thead><tr><th>状态</th><th>ID</th><th>任务</th><th>角色</th><th>依赖</th>'
-    + '<th>人日</th><th>验收标准</th><th>规格出处</th></tr></thead>' +
-    `<tbody>${rows}</tbody>`;
+    + '<th>人日</th><th>做什么 / 怎么做</th><th>验收标准</th><th>规格出处</th></tr></thead>'
+    + `<tbody>${rows}</tbody>`;
   const box = $('#specDecomp');
   if (box.scrollIntoView) box.scrollIntoView({ block: 'nearest' });
 }
@@ -2277,7 +2727,6 @@ async function viewHistory(runId) {
       seq: (it.events || []).length
     };
     app.nodes = it.nodes || [];
-    app.discussions = it.discussions || [];
     app.nodeById = {};
     app.nodes.forEach(n => app.nodeById[n.id] = n);
     app.edges = it.edges || [];
@@ -2312,12 +2761,771 @@ async function exitHistory() {
   setFoot('已返回当前状态');
 }
 
+/* ================================================================ 模型接入
+ * 密钥只在服务端保存（data/settings.json），前端只拿到掩码提示；
+ * 保存后 /api/state 的 settings.active 决定引擎走真实模型还是本地模拟。
+ */
+const PRESET_FALLBACK = [
+  { id: 'openai', name: 'OpenAI', base_url: 'https://api.openai.com/v1', model: 'gpt-4o-mini' },
+  { id: 'deepseek', name: 'DeepSeek', base_url: 'https://api.deepseek.com/v1', model: 'deepseek-chat' },
+  { id: 'anthropic', name: 'Anthropic', base_url: 'https://api.anthropic.com', model: 'claude-sonnet-4-5' },
+  { id: 'ollama', name: '本地 Ollama', base_url: 'http://127.0.0.1:11434/v1', model: 'qwen2.5-coder:14b' }
+];
+
+function presets() {
+  const p = (app.settings && app.settings.presets) || null;
+  return Array.isArray(p) && p.length ? p : PRESET_FALLBACK;
+}
+
+function openModel() {
+  if (app.frozen) { toast('历史回看中，先点「返回当前」', true); return; }
+  $('#modelPanel').hidden = false;
+  $('#specPanel').hidden = true;
+  $('#reqPanel').hidden = true;
+  $('#histPanel').hidden = true;
+  fillPresetSelect();
+  if (app.settings) fillSettings(app.settings);
+  else loadSettings();
+  const aiSel = $('#aiProvider');
+  if (aiSel && !aiSel.options.length) {
+    aiSel.innerHTML = presets().map(p =>
+      `<option value="${esc(p.id)}">${esc(p.label)}</option>`).join('');
+  }
+  loadAIs();
+}
+
+function closeModel() { $('#modelPanel').hidden = true; }
+
+async function loadSettings() {
+  try {
+    const r = await getJSON('/api/settings');
+    app.settings = r.settings;
+    fillPresetSelect();
+    fillSettings(r.settings);
+    renderModeChip();
+  } catch (e) {
+    toast('读取模型配置失败：' + (e && e.message ? e.message : e), true);
+  }
+}
+
+function fillPresetSelect() {
+  const sel = $('#setProvider');
+  if (!sel) return;
+  const list = presets();
+  const cur = (app.settings && app.settings.provider) || '';
+  sel.innerHTML = list.map(p =>
+    `<option value="${esc(p.id)}"${p.id === cur ? ' selected' : ''}>${esc(p.name)}</option>`).join('')
+    + `<option value="custom"${list.some(p => p.id === cur) ? '' : ' selected'}>自定义</option>`;
+}
+
+function fillSettings(s) {
+  if (!s) return;
+  $('#setBaseUrl').value = s.base_url || '';
+  $('#setModel').value = s.model || '';
+  $('#setKey').value = '';
+  $('#setKeyHint').textContent = s.has_key
+    ? ('已保存 ' + (s.key_hint || '••••')) : '未保存（必填才能用真实模型）';
+  $('#setTemp').value = s.temperature != null ? s.temperature : 0.2;
+  $('#setSteps').value = s.max_steps != null ? s.max_steps : 14;
+  $('#setMaxTokens').value = s.max_tokens != null ? s.max_tokens : 4096;
+  $('#setTimeout').value = s.timeout != null ? s.timeout : 180;
+  $('#tglUseLLM').checked = s.mode === 'llm';
+  const chip = $('#modelState');
+  if (s.active) { chip.textContent = '已启用'; chip.className = 'mode-chip on'; }
+  else if (s.has_key) { chip.textContent = '已配置 · 未启用'; chip.className = 'mode-chip'; }
+  else { chip.textContent = '未配置密钥'; chip.className = 'mode-chip warn'; }
+  renderAISection(s);
+  const provSel = $('#setProvider');
+  if (provSel && s.provider) {
+    const hit = Array.prototype.some.call(provSel.options, o => o.value === s.provider);
+    provSel.value = hit ? s.provider : 'custom';
+  }
+}
+
+function applyPreset(id) {
+  const p = presets().find(x => x.id === id);
+  if (!p) return;
+  $('#setBaseUrl').value = p.base_url || '';
+  $('#setModel').value = p.model || '';
+  if (!$('#setKey').value) $('#setKey').focus();
+}
+
+function onModeToggle() {
+  if ($('#tglUseLLM').checked && !(app.settings && app.settings.has_key)
+      && !$('#setKey').value.trim()) {
+    $('#setKey').focus();
+    toast('先填入 API Key（或选择本地 Ollama）再启用真实模型', true);
+  }
+}
+
+/* ---------------- 多个 AI 接入 ---------------- */
+const ROLE_AI_ROWS = [
+  ['pm', '产品经理'], ['architect', '架构师'], ['coder', '开发者'],
+  ['tester', '测试'], ['reviewer', '评审'],
+];
+
+function aiOptions(selected, emptyLabel) {
+  const opts = [`<option value="">${esc(emptyLabel || '（用默认 AI）')}</option>`];
+  app.ais.forEach(a => {
+    opts.push(`<option value="${esc(a.id)}"${a.id === selected ? ' selected' : ''}>`
+      + `${esc(a.label || a.model || a.id)}${a.has_key ? '' : '（未配密钥）'}</option>`);
+  });
+  return opts.join('');
+}
+
+function partMeta(pid) {
+  return app.partMeta[pid] || { label: pid || '未分组', color: '#94a3b8' };
+}
+
+function renderAISection(s) {
+  if (!s) return;
+  app.ais = s.ais || app.ais;
+  if (Array.isArray(s.parts)) {
+    app.parts = s.parts;
+    s.parts.forEach(p => { app.partMeta[p.id] = p; });
+  }
+  const list = $('#aiList');
+  if (list) {
+    list.innerHTML = app.ais.length ? app.ais.map(a => `
+      <div class="ai-card" data-ai="${esc(a.id)}">
+        <div>
+          <div class="ai-name">${esc(a.label || a.model || a.id)}</div>
+          <div class="ai-meta">${esc(a.provider || '')} · ${esc(a.model || '')}
+            · ${esc(a.base_url || '')}</div>
+          <div class="ai-key">${a.has_key ? '密钥 ' + esc(a.key_hint || '已保存') : '未保存密钥'}</div>
+        </div>
+        <div class="ai-actions">
+          <button class="btn sm ghost" onclick="probeAI('${esc(a.id)}')">测试</button>
+          <button class="btn sm ghost danger" onclick="deleteAI('${esc(a.id)}')">删除</button>
+        </div>
+      </div>`).join('')
+      : '<div class="muted">还没有额外的 AI；下面可以直接加一个</div>';
+  }
+  const roleRows = $('#roleAiRows');
+  if (roleRows) {
+    const mapping = s.role_ais || {};
+    roleRows.innerHTML = ROLE_AI_ROWS.map(([key, label]) => `
+      <div class="ai-assign-row"><span>${esc(label)}</span>
+        <select class="select sm" onchange="assignAI('role', '${key}', this.value)">
+          ${aiOptions(mapping[key])}
+        </select></div>`).join('');
+  }
+  const partRows = $('#partAiRows');
+  if (partRows) {
+    const mapping = s.part_ais || {};
+    partRows.innerHTML = app.parts.map(p => `
+      <div class="ai-assign-row"><span>${esc(p.label)}</span>
+        <select class="select sm" onchange="assignAI('part', '${p.id}', this.value)">
+          ${aiOptions(mapping[p.id])}
+        </select></div>`).join('');
+  }
+}
+
+async function loadAIs() {
+  try {
+    const r = await getJSON('/api/ais');
+    if (r && r.ok) {
+      app.ais = r.ais || [];
+      app.parts = r.parts || [];
+      (r.parts || []).forEach(p => { app.partMeta[p.id] = p; });
+      renderAISection({ ais: r.ais, parts: r.parts, role_ais: r.role_ais,
+                        part_ais: r.part_ais });
+    }
+  } catch (e) { /* 面板打不开也不影响主流程 */ }
+}
+
+function aiApplyPreset() {
+  const id = ($('#aiProvider') || {}).value;
+  const p = (app.settings && app.settings.presets ? app.settings.presets
+             : (app.presets || [])).find(x => x.id === id);
+  if (!p) return;
+  $('#aiBaseUrl').value = p.base_url || '';
+  $('#aiModel').value = p.model || '';
+}
+
+async function saveAI() {
+  const payload = {
+    label: ($('#aiLabel').value || '').trim(),
+    provider: ($('#aiProvider').value || 'openai'),
+    base_url: ($('#aiBaseUrl').value || '').trim(),
+    model: ($('#aiModel').value || '').trim(),
+    api_key: ($('#aiKey').value || '').trim(),
+  };
+  if (!payload.base_url || !payload.model) { toast('Base URL 和模型名都要填', true); return; }
+  const r = await api('/api/ais', payload);
+  if (!r.ok) { toast(r.message || '保存失败', true); return; }
+  ['aiLabel', 'aiKey'].forEach(id => { const e = $('#' + id); if (e) e.value = ''; });
+  app.settings = r.settings;
+  renderAISection(r.settings);
+  fillSettings(r.settings);
+  toast('已保存 AI：' + (payload.label || payload.model));
+}
+
+async function probeAI(id) {
+  toast('正在连这个 AI…');
+  const r = await api('/api/ais/' + encodeURIComponent(id) + '/probe', {});
+  if (r.ok) toast('连接成功 · ' + (r.probe.model || '') + ' · ' + r.probe.ms + 'ms');
+  else toast('连接失败：' + (r.message || ''), true);
+}
+
+async function deleteAI(id) {
+  if (!confirm('删除这个 AI 接入点？（用到它的角色/分组会回落到默认）')) return;
+  const r = await api('/api/ais/' + encodeURIComponent(id) + '/delete', {});
+  if (!r.ok) { toast(r.message || '删除失败', true); return; }
+  app.settings = r.settings;
+  renderAISection(r.settings);
+  toast('已删除');
+}
+
+async function assignAI(scope, key, aiId) {
+  const body = scope === 'role' ? { role_ais: { [key]: aiId || '' } }
+                               : { part_ais: { [key]: aiId || '' } };
+  const r = await api('/api/assign', body);
+  if (!r.ok) { toast(r.message || '指派失败', true); return; }
+  app.settings = r.settings;
+  toast(aiId ? '已指派' : '已改回默认 AI');
+}
+
+async function clearKey() {
+  const cur = app.settings || {};
+  const fromEnv = cur.key_source === 'env';
+  const ask = fromEnv
+    ? '这个密钥来自环境变量 AUTFLOW_LLM_KEY。现在清除会把进程内的配置也停用，'
+      + '但重启后环境变量还会生效——要永久清除请同时删掉那个环境变量。继续？'
+    : '彻底清除已保存的 API Key？\n\n会从 data/settings.json 里删掉密钥字段、'
+      + '并把执行模式切回模拟；之后不会再自己回来。';
+  if (!confirm(ask)) return;
+  const r = await api('/api/settings/clear-key', {});
+  if (!r || !r.ok) { toast((r && r.message) || '清除失败', true); return; }
+  app.settings = r.settings;
+  const key = $('#setKey');
+  if (key) key.value = '';
+  fillSettings(r.settings);
+  renderModeChip();
+  syncDiscussUI();
+  toast('已彻底清除密钥（磁盘与内存都不再保留），当前为模拟模式');
+}
+
+async function saveSettings() {
+  const btn = $('#btnSaveSettings'), note = $('#modelNote');
+  const payload = {
+    provider: $('#setProvider').value,
+    base_url: $('#setBaseUrl').value.trim(),
+    model: $('#setModel').value.trim(),
+    temperature: parseFloat($('#setTemp').value),
+    max_steps: parseInt($('#setSteps').value, 10),
+    max_tokens: parseInt($('#setMaxTokens').value, 10),
+    timeout: parseInt($('#setTimeout').value, 10),
+    mode: $('#tglUseLLM').checked ? 'llm' : 'mock'
+  };
+  const key = $('#setKey').value.trim();
+  if (key) payload.api_key = key;
+  if (payload.mode === 'llm' && !key && !(app.settings && app.settings.has_key)) {
+    toast('启用真实模型需要 API Key', true);
+    $('#setKey').focus();
+    return;
+  }
+  btn.disabled = true; btn.textContent = '保存中…';
+  try {
+    const r = await api('/api/settings', payload);
+    if (!r.ok) { note.textContent = r.message || '保存失败'; return; }
+    app.settings = r.settings;
+    fillSettings(r.settings);
+    renderModeChip();
+    note.textContent = r.settings.active
+      ? '已启用 · 下一次运行会用真实模型（编码/测试/评审会真的写文件）'
+      : '已保存 · 当前仍是模拟模式';
+    toast(r.settings.active ? '已启用真实模型' : '配置已保存');
+  } catch (e) {
+    note.textContent = '保存失败：' + (e && e.message ? e.message : e);
+  } finally {
+    btn.disabled = false; btn.textContent = '保存配置';
+  }
+}
+
+async function probeModel() {
+  const btn = $('#btnProbe'), box = $('#probeBox'), note = $('#modelNote');
+  btn.disabled = true; btn.textContent = '测试中…';
+  box.hidden = false; box.className = 'probe-box'; box.textContent = '正在请求模型…';
+  try {
+    const r = await api('/api/settings/probe', {}, 'POST');
+    if (r.ok && r.probe) {
+      const p = r.probe;
+      box.className = 'probe-box ok';
+      box.textContent = `连接成功 · ${p.provider} / ${p.model} · ${p.ms}ms\n`
+        + `回复：${truncate(p.reply || '', 160)}`
+        + (p.usage ? `\n用量：in ${p.usage.in || 0} / out ${p.usage.out || 0}` : '');
+      note.textContent = '连接正常';
+    } else {
+      box.className = 'probe-box bad';
+      box.textContent = (r.code ? `[${r.code}] ` : '') + (r.message || '连接失败');
+      note.textContent = '连接失败';
+    }
+  } catch (e) {
+    box.className = 'probe-box bad';
+    box.textContent = '测试失败：' + (e && e.message ? e.message : e);
+  } finally {
+    btn.disabled = false; btn.textContent = '测试连接';
+  }
+}
+
+function renderModeChip() {
+  // 顶栏只有一个执行模式入口：它既是状态徽标，也是模型配置入口
+  const chip = $('#btnModel');
+  if (!chip) return;
+  const s = app.settings || {};
+  const live = app.run && app.run.mode === 'llm'
+    && ['RUNNING', 'PAUSED', 'WAITING_HUMAN', 'RECONCILING'].indexOf(app.run.status) >= 0;
+  // 标签里始终保留「模型」二字：它既是状态，也是模型配置入口
+  if (live) { chip.textContent = '⚙ 模型 · 运行中'; chip.className = 'mode-chip btn sm on'; }
+  else if (s.active) { chip.textContent = '⚙ 模型 · 真实模型'; chip.className = 'mode-chip btn sm on'; }
+  else if (s.has_key) { chip.textContent = '⚙ 模型 · 模拟（已配置未启用）'; chip.className = 'mode-chip btn sm'; }
+  else { chip.textContent = '⚙ 模型 · 模拟'; chip.className = 'mode-chip btn sm'; }
+  chip.title = s.active
+    ? ('真实模型：' + (s.provider || '') + ' / ' + (s.model || '')
+       + ' — 可做 AI 规划讨论与真实执行；点此修改配置')
+    : '当前为本地确定性模拟：可以跑完整流程，但没有模型参与；点此配置大模型';
+  syncDiscussUI();
+}
+
+/* ================================================================ 规格文档导入 */
+function toggleSpecPaste() {
+  const t = $('#specPaste'), row = $('#pasteActions');
+  const show = t.hidden;
+  t.hidden = !show;
+  if (row) row.hidden = !show;
+  if (show) t.focus();
+}
+
+async function importSpecFile(input) {
+  const file = input.files && input.files[0];
+  if (!file) return;
+  try {
+    const text = await file.text();
+    await parseSpecToForm(text, file.name);
+  } catch (e) {
+    toast('读取文件失败：' + (e && e.message ? e.message : e), true);
+  } finally {
+    input.value = '';                    // 允许重复导入同一个文件
+  }
+}
+
+async function parseSpecText() {
+  const text = $('#specPaste').value;
+  if (!text.trim()) { toast('先把规格正文粘贴进来', true); return; }
+  await parseSpecToForm(text, '');
+}
+
+async function parseSpecToForm(text, name) {
+  const note = $('#importNote'), specNote = $('#specNote');
+  note.textContent = '解析中…';
+  try {
+    const r = await api('/api/specs/import', { text, name: name || '' });
+    if (!r.ok) { note.textContent = r.message || '解析失败'; return; }
+    const s = r.spec;
+    if (app.preview) cancelPreview({ silent: true });
+    app.specId = null;
+    $('#specName').value = s.name || '';
+    $('#specSummary').value = s.summary || '';
+    $('#specBody').value = s.body || '';
+    $('#specConstraints').value = (s.constraints || []).join('\n');
+  syncConstraintCount();
+    app.specModules = (s.modules || []).map((m, i) => ({
+      id: '', name: m.name || '', goal: m.goal || '',
+      priority: m.priority || 'P1', acceptance: m.acceptance || []
+    }));
+    renderSpecModules();
+    const st = s.stats || {};
+    note.textContent = `已读入 ${st.modules} 个模块 · ${st.acceptance} 条验收 · ${st.constraints} 条约束（${st.chars} 字）`;
+    $('#specDecomp').hidden = false;
+    $('#specStats').textContent = '导入解析结果';
+    $('#specTrace').innerHTML = (s.trace || [])
+      .map(t => `<div class="trace-line">· ${esc(t)}</div>`).join('');
+    $('#specTasks').innerHTML = '<tbody><tr><td colspan="9" class="muted">'
+      + '内容已填进表单；点「分解预览」把这份规格拆成任务</td></tr></tbody>';
+    $('#specMeta').textContent = '导入待保存';
+    if (specNote) {
+      specNote.textContent = '文档已解析成表单，确认无误后点「保存规格」';
+      if (!app.specId) syncSpecButtonsFromForm();
+    }
+    toast('已导入：' + st.modules + ' 个模块');
+    if ($('#specPaste').hidden === false) $('#specPaste').hidden = true;
+    if ($('#pasteActions')) $('#pasteActions').hidden = true;
+  } catch (e) {
+    note.textContent = '解析失败：' + (e && e.message ? e.message : e);
+  }
+}
+
+/* 导入后还没保存，规格按钮要能直接用 */
+function syncSpecButtonsFromForm() {
+  const d = $('#btnSpecDecompose');
+  if (d) { d.disabled = false; d.title = '保存规格后才能预览（会先保存当前表单）'; }
+}
+
+function bindSpecDrop() {
+  ['dragover', 'drop'].forEach(ev => document.addEventListener(ev, (e) => {
+    if (ev === 'dragover') { e.preventDefault(); return; }
+    e.preventDefault();
+    const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    if (!f) return;
+    if (!/\.(md|markdown|txt|json)$/i.test(f.name)) {
+      toast('只支持 .md / .txt / .json', true); return;
+    }
+    openSpec();
+    f.text().then(t => parseSpecToForm(t, f.name)).catch(() => toast('读取失败', true));
+  }));
+}
+
+/* ---------------------------------------------------------- 全局约束输入框 */
+function syncConstraintCount() {
+  const ta = $('#specConstraints');
+  const label = $('#specConstraintCount');
+  const lines = (ta.value || '').split('\n').map(x => x.trim()).filter(Boolean);
+  if (label) label.textContent = lines.length ? lines.length + ' 条' : '0 条';
+  // 随内容长高（最多 320px），避免长约束挤在一条窄缝里
+  ta.style.height = 'auto';
+  ta.style.height = Math.min(320, Math.max(120, ta.scrollHeight)) + 'px';
+}
+
+/* ================================================================ 多智能体讨论 */
+app.discuss = app.discuss || { sid: null, timer: null, session: null, busy: false, shown: 0 };
+app.nodeEdit = app.nodeEdit || null;
+app.apComment = '';
+
+const DISCUSS_ROLE_CLASS = {
+  pm: 'r-pm', architect: 'r-arch', coder: 'r-coder',
+  tester: 'r-qa', reviewer: 'r-rev'
+};
+
+function discussConfigured() {
+  return !!(app.settings && app.settings.active);
+}
+
+function syncDiscussUI() {
+  const btn = $('#btnDiscuss'), hint = $('#discussHint');
+  if (!btn) return;
+  const ok = discussConfigured();
+  const busy = !!app.discuss.busy;
+  btn.disabled = !ok || busy;
+  btn.textContent = busy ? '讨论中…' : '让 AI 讨论并出任务清单';
+  if (hint) {
+    hint.textContent = !ok
+      ? '当前是模拟模式：点顶栏「模拟」配置 Base URL 与 Key 之后，才能让几个角色围绕这份规格讨论'
+      : (busy ? (app.discuss.session && app.discuss.session.stage) || '讨论中…'
+              : '产品经理 / 架构师 / 开发者 / 测试 / 评审依次发言，两轮后汇总成任务清单');
+  }
+  const stop = $('#btnDiscussStop');
+  if (stop) stop.hidden = !busy;
+  const badge = $('#discussBadge');
+  if (badge) {
+    const s = app.discuss.session;
+    if (busy && s) { badge.hidden = false; badge.textContent = s.stage || '进行中'; badge.className = 'discuss-badge on'; }
+    else if (s && s.status === 'done') { badge.hidden = false; badge.textContent = '已完成 · ' + (s.tasks || []).length + ' 条任务'; badge.className = 'discuss-badge ok'; }
+    else if (s && s.status === 'error') { badge.hidden = false; badge.textContent = '讨论失败'; badge.className = 'discuss-badge bad'; }
+    else if (s && s.status === 'cancelled') { badge.hidden = false; badge.textContent = '已取消'; badge.className = 'discuss-badge'; }
+    else badge.hidden = true;
+  }
+}
+
+function resetDiscussLog() {
+  const log = $('#discussLog');
+  if (log) { log.innerHTML = ''; log.hidden = true; }
+  app.discuss.shown = 0;
+}
+
+async function startDiscuss() {
+  if (app.discuss.busy) return;
+  if (!discussConfigured()) {
+    toast('先配置真实模型：填 Base URL 与 API Key', true);
+    openModel();
+    return;
+  }
+  if (app.run.status && ['RUNNING', 'PAUSED', 'WAITING_HUMAN', 'RECONCILING'].indexOf(app.run.status) >= 0) {
+    toast('运行进行中，稍后再开讨论会', true); return;
+  }
+  // 讨论的必须是"屏幕上这份规格"：先把表单存了，避免讨论的是旧版本
+  await saveSpec();
+  if (!app.specId) return;
+  const template = ($('#selSpecTemplate') || {}).value || app.specTemplate || 'default';
+  resetDiscussLog();
+  const log = $('#discussLog');
+  try {
+    const r = await api('/api/specs/' + encodeURIComponent(app.specId) + '/discuss', { template });
+    if (!r.ok) { if (log) { log.hidden = false; log.innerHTML = '<div class="dis-err">' + esc(r.message || '讨论没能开始') + '</div>'; } toast(r.message || '讨论没能开始', true); return; }
+    app.discuss.sid = r.session_id;
+    app.discuss.session = r.session;
+    app.discuss.busy = true;
+    discussSayRowVisible();
+    if (log) log.hidden = false;
+    syncDiscussUI();
+    pollDiscuss();
+  } catch (e) {
+    toast('讨论启动失败：' + (e && e.message ? e.message : e), true);
+  }
+}
+
+function pollDiscuss() {
+  clearInterval(app.discuss.timer);
+  app.discuss.timer = setInterval(refreshDiscuss, 800);
+  refreshDiscuss();
+}
+
+async function refreshDiscuss() {
+  const sid = app.discuss.sid;
+  if (!sid) return;
+  let data;
+  try {
+    const res = await fetch('/api/plan/' + encodeURIComponent(sid));
+    data = await res.json();
+  } catch (e) {
+    return;                     // 网络抖动：下一次轮询接着来
+  }
+  if (!data || !data.session) return;
+  app.discuss.session = data.session;
+  renderDiscuss(data.session);
+  syncDiscussUI();
+  if (data.session.status !== 'running') {
+    clearInterval(app.discuss.timer);
+    app.discuss.timer = null;
+    app.discuss.busy = false;
+    syncDiscussUI();
+  }
+}
+
+function renderDiscuss(s) {
+  const log = $('#discussLog');
+  if (!log) return;
+  log.hidden = false;
+  const minutes = s.minutes || [];
+  for (let i = app.discuss.shown; i < minutes.length; i++) {
+    const m = minutes[i];
+    const div = document.createElement('div');
+    const cls = m.kind === 'human' ? 'r-human' : (DISCUSS_ROLE_CLASS[m.role] || '');
+    div.className = 'dis-line ' + cls;
+    div.innerHTML = `<div class="dis-head">
+        <span class="dis-who">${m.kind === 'human' ? '🧑 人工' : esc(m.label || m.role)}</span>
+        <span class="dis-round">第 ${m.round || 1} 轮</span>
+        ${m.why ? `<span class="dis-why">${esc(m.why)}</span>` : ''}
+        <span class="dis-at">${esc(m.at || '')}</span>
+      </div>
+      <div class="dis-text">${esc(m.content || '')}</div>`
+      + ((m.points || []).length
+        ? '<ul class="dis-points">' + m.points.map(p => `<li>${esc(p)}</li>`).join('') + '</ul>'
+        : '');
+    log.appendChild(div);
+    app.discuss.shown = i + 1;
+    log.scrollTop = log.scrollHeight;
+  }
+
+  const tail = log.querySelector('.dis-tail');
+  if (tail) tail.remove();
+
+  const box = document.createElement('div');
+  box.className = 'dis-tail';
+  if (s.status === 'running') {
+    box.innerHTML = `<div class="dis-wait">… ${esc(s.stage || '讨论中')}</div>`;
+  } else if (s.status === 'error') {
+    const err = s.error || {};
+    box.innerHTML = `<div class="dis-err">${esc((err.code || 'E-AGENT') + '：' + (err.message || '讨论失败'))}
+      <div class="dis-hint">检查一下模型地址、密钥和额度；也可以直接用「分解预览」走离线规则分解。</div></div>`;
+  } else if (s.status === 'cancelled') {
+    box.innerHTML = '<div class="dis-hint">讨论已取消，没有生成任务清单。</div>';
+  } else if (s.status === 'done') {
+    const fixes = s.fixes || [];
+    box.innerHTML = `${consensusHTML(s)}<div class="dis-done">
+        <b>讨论完成</b>：${(s.minutes || []).length} 条发言 → ${(s.tasks || []).length} 条任务
+        ${s.usage && s.usage.prompt_tokens ? `<span class="dis-usage">token ${s.usage.prompt_tokens}↑ ${s.usage.completion_tokens}↓</span>` : ''}
+      </div>
+      ${(s.trace || []).map(t => `<div class="trace-line">· ${esc(t)}</div>`).join('')}
+      ${fixes.length ? `<details class="dis-fixes"><summary>代码侧修正 ${fixes.length} 处</summary>`
+        + fixes.map(f => `<div class="trace-line">· ${esc(f)}</div>`).join('') + '</details>' : ''}
+      <div class="dis-actions">
+        <button class="btn primary dis-apply" onclick="applyDiscussion()">就按这个编排生成工作流</button>
+        ${(['blocked', 'partial'].indexOf((s.consensus || {}).status) >= 0 && !s.human_decision)
+          ? `<button class="btn warn" onclick="decideDiscussion('accept')">接受当前清单</button>
+             <button class="btn ghost" onclick="decideDiscussion('resume')">继续讨论分歧</button>` : ''}
+        <span class="panel-note">生成后可继续在画布上手动调整</span>
+      </div>`;
+  }
+  log.appendChild(box);
+  log.scrollTop = log.scrollHeight;
+}
+
+/* 共识面板：谁同意、谁要改、谁有阻塞，以及人工介入了几次 */
+function consensusHTML(s) {
+  const c = s.consensus || {};
+  const votes = (s.votes && s.votes.length) ? (s.votes[s.votes.length - 1].votes || []) : [];
+  if (!votes.length && !c.status) return '';
+  const chip = (label, stance) => `<span class="stance stance-${stance}">${esc(label)} · ${
+    { agree: '同意', revise: '要改', block: '有阻塞' }[stance] || stance}</span>`;
+  const humans = (s.humans || []).length;
+  return `<div class="consensus-box">
+    <div class="cons-head"><b>共识：${
+      { reached: '已达成', adopted: '人工拍板采纳', partial: '部分同意', blocked: '有阻塞',
+        none: '未表决' }[c.status] || c.status || '进行中'}</b>
+      ${humans ? `<span class="panel-note">人工介入 ${humans} 次</span>` : ''}</div>
+    <div class="stance-row">${votes.map(v => chip(v.label, v.stance)).join('')}</div>
+    ${(c.unresolved || []).length
+      ? `<div class="unresolved"><b>未解决</b>${c.unresolved.map(x =>
+          `<div class="trace-line">· ${esc(x)}</div>`).join('')}</div>` : ''}
+  </div>`;
+}
+
+function discussSayRowVisible() {
+  const row = $('#discussSayRow');
+  if (row) row.hidden = !app.discuss.sid;
+}
+
+async function sendDiscussSay() {
+  const inp = $('#discussSay');
+  const text = ((inp && inp.value) || '').trim();
+  if (!text) { toast('先写一句要引导的话', true); return; }
+  if (!app.discuss.sid) { toast('先开一场讨论', true); return; }
+  const btn = $('#btnDiscussSay');
+  if (btn) btn.disabled = true;
+  try {
+    const r = await api('/api/plan/' + encodeURIComponent(app.discuss.sid) + '/say',
+                        { text: text });
+    if (r.ok) {
+      if (inp) inp.value = '';
+      app.discuss.busy = true;
+      pollDiscuss();
+      toast('已插话：对口角色会在下一位回应');
+    } else toast(r.message || '插话失败', true);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function decideDiscussion(action) {
+  if (!app.discuss.sid) return;
+  const r = await api('/api/plan/' + encodeURIComponent(app.discuss.sid) + '/decide',
+                      { action: action });
+  if (!r.ok) { toast(r.message || '操作失败', true); return; }
+  toast(action === 'accept' ? '已采纳当前清单，可以生成工作流' : '已让相关角色继续讨论');
+  refreshDiscuss();
+}
+
+function discussApplyButton() {
+  return document.querySelector('.dis-apply');
+}
+
+async function applyDiscussion() {
+  if (!app.discuss.sid) return;
+  const btn = discussApplyButton();
+  if (btn) { btn.disabled = true; btn.textContent = '生成中…'; }
+  const template = ($('#selSpecTemplate') || {}).value || app.specTemplate || 'default';
+  try {
+    const r = await api('/api/plan/' + encodeURIComponent(app.discuss.sid), { template });
+    if (!r.ok) {
+      toast(r.message || '生成失败', true);
+      if (btn) { btn.disabled = false; btn.textContent = '就按这个编排生成工作流'; }
+      return;
+    }
+    if (app.preview) {
+      app.preview = null;
+      app.mode = app.previewMode || 'view';
+      app.defKey = '';
+      clearTasks();
+    }
+    app.tasks = r.tasks || [];
+    app.specTemplate = template;
+    await loadEditor();
+    closeSpec();
+    await refresh();
+    syncSpecTemplate();
+    const d = r.discussion || {};
+    setFoot(`已按 AI 讨论结果编排 ${(r.tasks || []).length} 条任务 · ${d.minutes || 0} 条发言 · `
+      + `${r.stats.nodes} 节点 / ${r.stats.edges} 边`);
+    toast('已按讨论结果生成工作流草稿');
+  } catch (e) {
+    toast('生成失败：' + (e && e.message ? e.message : e), true);
+    if (btn) { btn.disabled = false; btn.textContent = '就按这个编排生成工作流'; }
+  }
+}
+
+async function stopDiscuss() {
+  if (!app.discuss.sid) return;
+  try {
+    await api('/api/plan/' + encodeURIComponent(app.discuss.sid) + '/cancel', {});
+    toast('已请求停止讨论');
+  } catch (e) { /* 忽略：下次轮询会拿到最终状态 */ }
+}
+
+/* ================================================================ 运行产物 */
+function currentRunId() {
+  return (app.run && app.run.run_id) || app.runId || null;
+}
+
+function renderFileBadge() {
+  const badge = $('#fileCount');
+  if (!badge) return;
+  const n = ((app.run && app.run.artifacts) || []).length;
+  badge.textContent = n;
+}
+
+async function loadRunFiles() {
+  const list = $('#fileList'), hint = $('#filesHint');
+  const rid = currentRunId();
+  if (!rid) { list.innerHTML = '<div class="empty">还没有运行</div>'; return; }
+  list.innerHTML = '<div class="empty">加载中…</div>';
+  try {
+    const r = await getJSON('/api/runs/' + encodeURIComponent(rid) + '/files');
+    const files = r.files || [];
+    const art = {};
+    (r.artifacts || []).forEach(a => art[a.path] = a);
+    if (!files.length) {
+      list.innerHTML = '<div class="empty">这次运行还没有落盘文件'
+        + (app.run.mode === 'llm' ? '' : '（当前是模拟模式，配置模型后才有真实产物）') + '</div>';
+      hint.textContent = '工作区：' + (r.workspace || '未创建');
+      return;
+    }
+    hint.textContent = `${files.length} 个文件 · 工作区 ${r.workspace || '—'}`;
+    list.innerHTML = files.map(f => `
+      <div class="file-row" onclick="openRunFile('${esc(f.path)}')" title="${esc(f.path)}">
+        <span class="fr-path">${esc(f.path)}</span>
+        ${art[f.path] ? '<span class="fr-badge">产物</span>' : ''}
+        <span class="fr-size">${fmtBytes(f.bytes)}</span>
+      </div>`).join('');
+  } catch (e) {
+    list.innerHTML = '<div class="empty">读取失败：' + esc(e && e.message ? e.message : e) + '</div>';
+  }
+}
+
+function fmtBytes(n) {
+  n = n || 0;
+  if (n < 1024) return n + ' B';
+  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+  return (n / 1024 / 1024).toFixed(1) + ' MB';
+}
+
+async function openRunFile(path) {
+  const rid = currentRunId();
+  if (!rid) return;
+  const view = $('#fileView');
+  try {
+    const r = await getJSON('/api/runs/' + encodeURIComponent(rid)
+      + '/file?path=' + encodeURIComponent(path));
+    if (!r.ok && r.error) { toast(r.error, true); return; }
+    $('#fileViewPath').textContent = path + (r.truncated ? '（已截断）' : '');
+    $('#fileViewBody').textContent = r.content || '';
+    view.hidden = false;
+  } catch (e) {
+    toast('打开文件失败：' + (e && e.message ? e.message : e), true);
+  }
+}
+
+function closeFileView() { $('#fileView').hidden = true; }
+
 (async function boot() {
   bindUI();
   bindCanvas();
+  bindSpecDrop();
   await loadEditor();
   await loadTemplates();
   await refresh();
+  if (!app.settings) loadSettings();
+  loadAIs();
   connect();
   setInterval(() => {
     if (app.run && !app.frozen) { $('#runClock').textContent = fmtClock(app.run.elapsed); }

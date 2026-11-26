@@ -186,6 +186,12 @@ def suite_definitions():
             "server": False,
         },
         {
+            "name": "llm_tool_test",
+            "title": "D · 真实模型链路：配置 / 规格导入 / 真写文件真跑测试",
+            "command": [py, "tools/llm_tool_test.py"],
+            "server": False,
+        },
+        {
             "name": "fe_test",
             "title": "前端交互联调（DOM 桩）",
             "command": ["node", "tools/fe_test.js"],
@@ -204,6 +210,39 @@ def suite_definitions():
             "server": True,
             "with_artifacts": True,
             "browser": True,
+        },
+        {
+            "name": "sdd_flow_test",
+            "title": "G · 真实 SDD 全流程：规格文档 → 任务清单 → 工作流 → 跑完有内容",
+            "command": ["python", "tools/sdd_flow_test.py"],
+            "server": False,
+            "with_artifacts": False,
+        },
+        {
+            "name": "node_edit_e2e",
+            "title": "F · 真实浏览器：规格面板布局 / 节点内容 / 单节点编辑",
+            "command": ["node", "tools/node_edit_e2e.js"],
+            "server": True,
+            "with_artifacts": True,
+        },
+        {
+            "name": "multi_agent_test",
+            "title": "E · 多智能体规划：讨论 → 任务清单 → 工作流",
+            "command": [py, "tools/multi_agent_test.py"],
+            "server": False,
+        },
+        {
+            "name": "multi_ai_test",
+            "title": "H · 多 AI 接入 / 彻底清除密钥 / 任务分组",
+            "command": [py, "tools/multi_ai_test.py"],
+            "server": False,
+        },
+        {
+            "name": "llm_ui_e2e",
+            "title": "D · 真实浏览器：模型配置 / 规格导入 / 分层任务 / 产物页签",
+            "command": ["node", "tools/llm_ui_e2e.js"],
+            "server": True,
+            "with_artifacts": True,
         },
         {
             "name": "browser_e2e",
