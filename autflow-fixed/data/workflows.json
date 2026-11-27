@@ -1,8 +1,8 @@
 {
   "wf_login_001": {
     "id": "wf_login_001",
-    "name": "运维工单系统 v1 · 任务编排",
-    "requirement": "面向运维值班同学的工单系统，先做登录与工单流转。",
+    "name": "工单系统 v1 · 任务编排",
+    "requirement": "验收：错误提示明确",
     "versions": [
       {
         "version": "v1",
@@ -2183,60 +2183,2069 @@
             }
           ]
         }
+      },
+      {
+        "version": "v3",
+        "created_at": "2026-11-27T13:46:48",
+        "note": "画布编辑发布",
+        "definition": {
+          "workflow_id": "wf_login_001",
+          "name": "社区内容平台（小红书式） · 任务编排",
+          "version": "v3",
+          "description": "做一个图文内容社区：能发笔记、看推荐流、点赞评论关注、内容合规审核",
+          "requirement": "做一个图文内容社区：能发笔记、看推荐流、点赞评论关注、内容合规审核",
+          "spec_id": "SP2",
+          "spec_revision": 2,
+          "spec_hash": "3168ed156321edecedbd8272b7f1c2bca4222ac82c0fbed9d8e52f94eff48c0d",
+          "spec_snapshot": {
+            "id": "SP2",
+            "name": "社区内容平台（小红书式）",
+            "summary": "做一个图文内容社区：能发笔记、看推荐流、点赞评论关注、内容合规审核",
+            "body": "目标：面向年轻用户的内容社区 MVP。\n核心链路：发布笔记 → 进入推荐池 → 首页信息流分发 → 互动（点赞/评论/关注）→ 站内通知。\n红线：所有公开内容必须先过审核，违规内容不得进入推荐池；审核动作必须留痕可追溯。",
+            "modules": [
+              {
+                "id": "M1",
+                "name": "账号与内容发布",
+                "goal": "登录后发布图文笔记，支持草稿与定时发布",
+                "priority": "P0",
+                "acceptance": [
+                  "支持图文草稿保存与恢复",
+                  "发布成功后 3 秒内可被检索到",
+                  "违规内容在发布环节即被拦截"
+                ],
+                "deps": []
+              },
+              {
+                "id": "M2",
+                "name": "信息流推荐",
+                "goal": "首页推荐流，按兴趣与热度混排",
+                "priority": "P0",
+                "acceptance": [
+                  "首屏渲染 < 800ms",
+                  "支持下拉刷新与无限滚动",
+                  "同一用户 10 分钟内不重复推荐同一条"
+                ],
+                "deps": []
+              },
+              {
+                "id": "M3",
+                "name": "互动与通知",
+                "goal": "点赞、评论、关注，以及对应的站内通知",
+                "priority": "P1",
+                "acceptance": [
+                  "互动后 1 秒内产生通知",
+                  "通知列表区分已读未读",
+                  "取关后不再收到该用户通知"
+                ],
+                "deps": []
+              },
+              {
+                "id": "M4",
+                "name": "内容审核与风控",
+                "goal": "文本敏感词与图片机审，命中转人工复核队列",
+                "priority": "P0",
+                "acceptance": [
+                  "敏感词命中率 ≥ 95%",
+                  "人工复核队列支持指派与结论回写",
+                  "每次审核动作写入审计日志"
+                ],
+                "deps": []
+              }
+            ],
+            "constraints": [
+              "内容合规须满足《网络信息内容生态治理规定》",
+              "灰度发布，支持按用户分桶与一键回滚"
+            ],
+            "created_at": "2026-11-15T18:37:45",
+            "updated_at": "2026-11-27T13:22:47",
+            "revision": 2,
+            "content_hash": "3168ed156321edecedbd8272b7f1c2bca4222ac82c0fbed9d8e52f94eff48c0d"
+          },
+          "tasks": [
+            {
+              "id": "T1",
+              "title": "工程骨架与环境搭建",
+              "phase": "设计",
+              "phase_id": "P1",
+              "level": 2,
+              "what": "把项目骨架立起来：目录、入口、测试基线",
+              "how": "建 src/、tests/ 目录与 README；确保 python -m pytest -q 能跑",
+              "files": [
+                "README.md",
+                "src/__init__.py",
+                "tests/__init__.py"
+              ],
+              "steps": [
+                {
+                  "title": "建立目录与运行入口",
+                  "how": "创建 src/、tests/ 目录与 README，给出启动命令"
+                },
+                {
+                  "title": "建立测试基线",
+                  "how": "python -m pytest -q 能跑起来（哪怕只有 1 条用例）"
+                }
+              ],
+              "module": "",
+              "module_id": "",
+              "role": "后端",
+              "priority": "P0",
+              "estimate": 1,
+              "depends_on": [],
+              "acceptance": [
+                "构建脚本可一键起服务",
+                "目录结构与模板、规格存放就位"
+              ],
+              "acceptance_sources": [
+                "SP2/derived/engineering-skeleton",
+                "SP2/derived/engineering-skeleton"
+              ],
+              "spec_ref": "SP2",
+              "spec_revision": 2,
+              "spec_hash": "3168ed156321edecedbd8272b7f1c2bca4222ac82c0fbed9d8e52f94eff48c0d",
+              "kind": "foundation",
+              "out_schema": "code-result-v1",
+              "part": "skeleton",
+              "source": {
+                "spec_id": "SP2",
+                "revision": 2,
+                "module_id": "",
+                "module_name": ""
+              }
+            },
+            {
+              "id": "T2",
+              "title": "「账号与内容发布」方案与接口设计",
+              "phase": "设计",
+              "phase_id": "P1",
+              "level": 2,
+              "what": "给出「账号与内容发布」的接口、数据结构与错误码约定",
+              "how": "写 docs/design-m1.md：接口表、字段表、异常分支",
+              "files": [
+                "docs/design-m1.md"
+              ],
+              "steps": [
+                {
+                  "title": "定义接口与数据结构",
+                  "how": "写 docs/design-m1.md：接口表、字段表、错误码"
+                },
+                {
+                  "title": "对齐验收条款",
+                  "how": "逐条映射验收标准到接口或数据结构"
+                }
+              ],
+              "module": "账号与内容发布",
+              "module_id": "M1",
+              "role": "架构师",
+              "priority": "P0",
+              "estimate": 2,
+              "depends_on": [],
+              "acceptance": [
+                "输出接口与数据结构说明",
+                "与规格验收条款逐条对齐"
+              ],
+              "acceptance_sources": [
+                "SP2/M1/derived/design",
+                "SP2/M1/acceptance"
+              ],
+              "spec_ref": "SP2/M1",
+              "spec_revision": 2,
+              "spec_hash": "3168ed156321edecedbd8272b7f1c2bca4222ac82c0fbed9d8e52f94eff48c0d",
+              "kind": "design",
+              "out_schema": "design-v1",
+              "part": "skeleton",
+              "source": {
+                "spec_id": "SP2",
+                "revision": 2,
+                "module_id": "M1",
+                "module_name": "账号与内容发布"
+              }
+            },
+            {
+              "id": "T3",
+              "title": "「账号与内容发布」功能实现",
+              "phase": "编码",
+              "phase_id": "P2",
+              "level": 2,
+              "what": "交付「账号与内容发布」的可运行实现：登录后发布图文笔记，支持草稿与定时发布；满足 3 条验收（支持图文草稿保存与恢复；发布成功后 3 秒内可被检索到）",
+              "how": "Python 标准库实现：models.py 放数据模型与校验，service.py 放业务逻辑与接口路由，不引第三方依赖；完成后按验收条款逐条自测（取第一条条款写一条用例）",
+              "files": [
+                "src/m1/service.py",
+                "src/m1/models.py",
+                "tests/test_m1.py"
+              ],
+              "steps": [
+                {
+                  "title": "实现数据模型",
+                  "how": "写 src/m1/models.py"
+                },
+                {
+                  "title": "实现业务逻辑与接口",
+                  "how": "写 src/m1/service.py"
+                },
+                {
+                  "title": "补最小可运行用例",
+                  "how": "写 tests/test_m1.py 并跑通"
+                },
+                {
+                  "title": "按验收条款自测",
+                  "how": "逐条对照：支持图文草稿保存与恢复"
+                }
+              ],
+              "module": "账号与内容发布",
+              "module_id": "M1",
+              "role": "后端",
+              "priority": "P0",
+              "estimate": 6,
+              "depends_on": [],
+              "acceptance": [
+                "支持图文草稿保存与恢复",
+                "发布成功后 3 秒内可被检索到",
+                "违规内容在发布环节即被拦截"
+              ],
+              "acceptance_sources": [
+                "SP2/M1/acceptance/1",
+                "SP2/M1/acceptance/2",
+                "SP2/M1/acceptance/3"
+              ],
+              "spec_ref": "SP2/M1",
+              "spec_revision": 2,
+              "spec_hash": "3168ed156321edecedbd8272b7f1c2bca4222ac82c0fbed9d8e52f94eff48c0d",
+              "kind": "implementation",
+              "out_schema": "code-result-v1",
+              "part": "feature",
+              "source": {
+                "spec_id": "SP2",
+                "revision": 2,
+                "module_id": "M1",
+                "module_name": "账号与内容发布"
+              }
+            },
+            {
+              "id": "T4",
+              "title": "「账号与内容发布」单元测试与回归",
+              "phase": "测试",
+              "phase_id": "P3",
+              "level": 2,
+              "what": "为「账号与内容发布」补用例并跑通：正常 / 边界 / 异常",
+              "how": "pytest：tests/test_m1.py，命令 python -m pytest -q",
+              "files": [
+                "tests/test_m1.py"
+              ],
+              "steps": [
+                {
+                  "title": "设计用例矩阵",
+                  "how": "正常路径 / 边界 / 异常各至少 1 条"
+                },
+                {
+                  "title": "落地测试文件",
+                  "how": "写 tests/test_m1.py，用 pytest 断言"
+                },
+                {
+                  "title": "跑测试并记录证据",
+                  "how": "python -m pytest -q，把通过/失败数写进产物"
+                }
+              ],
+              "module": "账号与内容发布",
+              "module_id": "M1",
+              "role": "测试",
+              "priority": "P0",
+              "estimate": 2,
+              "depends_on": [],
+              "acceptance": [
+                "支持图文草稿保存与恢复",
+                "发布成功后 3 秒内可被检索到",
+                "违规内容在发布环节即被拦截"
+              ],
+              "acceptance_sources": [
+                "SP2/M1/acceptance/1",
+                "SP2/M1/acceptance/2",
+                "SP2/M1/acceptance/3"
+              ],
+              "spec_ref": "SP2/M1",
+              "spec_revision": 2,
+              "spec_hash": "3168ed156321edecedbd8272b7f1c2bca4222ac82c0fbed9d8e52f94eff48c0d",
+              "kind": "verification",
+              "out_schema": "test-v1",
+              "part": "test",
+              "source": {
+                "spec_id": "SP2",
+                "revision": 2,
+                "module_id": "M1",
+                "module_name": "账号与内容发布"
+              }
+            },
+            {
+              "id": "T5",
+              "title": "「账号与内容发布」代码评审",
+              "phase": "评审",
+              "phase_id": "P4",
+              "level": 2,
+              "what": "对照验收条款评审「账号与内容发布」的实现，给出问题清单与结论",
+              "how": "读实现与测试，检查重复逻辑/异常处理/硬编码/越界；阻塞问题必须列出",
+              "files": [],
+              "steps": [
+                {
+                  "title": "对照验收条款检查实现",
+                  "how": "逐条读代码，标出未满足项"
+                },
+                {
+                  "title": "检查代码质量",
+                  "how": "重复逻辑、异常处理、硬编码、越界与注入风险"
+                },
+                {
+                  "title": "给出结论",
+                  "how": "阻塞问题必须列出，最后给 pass/fail"
+                }
+              ],
+              "module": "账号与内容发布",
+              "module_id": "M1",
+              "role": "评审",
+              "priority": "P0",
+              "estimate": 1,
+              "depends_on": [],
+              "acceptance": [
+                "支持图文草稿保存与恢复",
+                "发布成功后 3 秒内可被检索到",
+                "违规内容在发布环节即被拦截"
+              ],
+              "acceptance_sources": [
+                "SP2/M1/acceptance/1",
+                "SP2/M1/acceptance/2",
+                "SP2/M1/acceptance/3"
+              ],
+              "spec_ref": "SP2/M1",
+              "spec_revision": 2,
+              "spec_hash": "3168ed156321edecedbd8272b7f1c2bca4222ac82c0fbed9d8e52f94eff48c0d",
+              "kind": "review",
+              "out_schema": "verify-v1",
+              "part": "review",
+              "source": {
+                "spec_id": "SP2",
+                "revision": 2,
+                "module_id": "M1",
+                "module_name": "账号与内容发布"
+              }
+            },
+            {
+              "id": "T6",
+              "title": "「信息流推荐」方案与接口设计",
+              "phase": "设计",
+              "phase_id": "P1",
+              "level": 2,
+              "what": "给出「信息流推荐」的接口、数据结构与错误码约定",
+              "how": "写 docs/design-m2.md：接口表、字段表、异常分支",
+              "files": [
+                "docs/design-m2.md"
+              ],
+              "steps": [
+                {
+                  "title": "定义接口与数据结构",
+                  "how": "写 docs/design-m2.md：接口表、字段表、错误码"
+                },
+                {
+                  "title": "对齐验收条款",
+                  "how": "逐条映射验收标准到接口或数据结构"
+                }
+              ],
+              "module": "信息流推荐",
+              "module_id": "M2",
+              "role": "架构师",
+              "priority": "P0",
+              "estimate": 2,
+              "depends_on": [],
+              "acceptance": [
+                "输出接口与数据结构说明",
+                "与规格验收条款逐条对齐"
+              ],
+              "acceptance_sources": [
+                "SP2/M2/derived/design",
+                "SP2/M2/acceptance"
+              ],
+              "spec_ref": "SP2/M2",
+              "spec_revision": 2,
+              "spec_hash": "3168ed156321edecedbd8272b7f1c2bca4222ac82c0fbed9d8e52f94eff48c0d",
+              "kind": "design",
+              "out_schema": "design-v1",
+              "part": "skeleton",
+              "source": {
+                "spec_id": "SP2",
+                "revision": 2,
+                "module_id": "M2",
+                "module_name": "信息流推荐"
+              }
+            },
+            {
+              "id": "T7",
+              "title": "「信息流推荐」功能实现",
+              "phase": "编码",
+              "phase_id": "P2",
+              "level": 2,
+              "what": "交付「信息流推荐」的可运行实现：首页推荐流，按兴趣与热度混排；满足 3 条验收（首屏渲染 < 800ms；支持下拉刷新与无限滚动）",
+              "how": "Python 标准库实现：models.py 放数据模型与校验，service.py 放业务逻辑与接口路由，不引第三方依赖；完成后按验收条款逐条自测（取第一条条款写一条用例）",
+              "files": [
+                "src/m2/service.py",
+                "src/m2/models.py",
+                "tests/test_m2.py"
+              ],
+              "steps": [
+                {
+                  "title": "实现数据模型",
+                  "how": "写 src/m2/models.py"
+                },
+                {
+                  "title": "实现业务逻辑与接口",
+                  "how": "写 src/m2/service.py"
+                },
+                {
+                  "title": "补最小可运行用例",
+                  "how": "写 tests/test_m2.py 并跑通"
+                },
+                {
+                  "title": "按验收条款自测",
+                  "how": "逐条对照：首屏渲染 < 800ms"
+                }
+              ],
+              "module": "信息流推荐",
+              "module_id": "M2",
+              "role": "后端",
+              "priority": "P0",
+              "estimate": 6,
+              "depends_on": [],
+              "acceptance": [
+                "首屏渲染 < 800ms",
+                "支持下拉刷新与无限滚动",
+                "同一用户 10 分钟内不重复推荐同一条"
+              ],
+              "acceptance_sources": [
+                "SP2/M2/acceptance/1",
+                "SP2/M2/acceptance/2",
+                "SP2/M2/acceptance/3"
+              ],
+              "spec_ref": "SP2/M2",
+              "spec_revision": 2,
+              "spec_hash": "3168ed156321edecedbd8272b7f1c2bca4222ac82c0fbed9d8e52f94eff48c0d",
+              "kind": "implementation",
+              "out_schema": "code-result-v1",
+              "part": "feature",
+              "source": {
+                "spec_id": "SP2",
+                "revision": 2,
+                "module_id": "M2",
+                "module_name": "信息流推荐"
+              }
+            },
+            {
+              "id": "T8",
+              "title": "「信息流推荐」单元测试与回归",
+              "phase": "测试",
+              "phase_id": "P3",
+              "level": 2,
+              "what": "为「信息流推荐」补用例并跑通：正常 / 边界 / 异常",
+              "how": "pytest：tests/test_m2.py，命令 python -m pytest -q",
+              "files": [
+                "tests/test_m2.py"
+              ],
+              "steps": [
+                {
+                  "title": "设计用例矩阵",
+                  "how": "正常路径 / 边界 / 异常各至少 1 条"
+                },
+                {
+                  "title": "落地测试文件",
+                  "how": "写 tests/test_m2.py，用 pytest 断言"
+                },
+                {
+                  "title": "跑测试并记录证据",
+                  "how": "python -m pytest -q，把通过/失败数写进产物"
+                }
+              ],
+              "module": "信息流推荐",
+              "module_id": "M2",
+              "role": "测试",
+              "priority": "P0",
+              "estimate": 2,
+              "depends_on": [],
+              "acceptance": [
+                "首屏渲染 < 800ms",
+                "支持下拉刷新与无限滚动",
+                "同一用户 10 分钟内不重复推荐同一条"
+              ],
+              "acceptance_sources": [
+                "SP2/M2/acceptance/1",
+                "SP2/M2/acceptance/2",
+                "SP2/M2/acceptance/3"
+              ],
+              "spec_ref": "SP2/M2",
+              "spec_revision": 2,
+              "spec_hash": "3168ed156321edecedbd8272b7f1c2bca4222ac82c0fbed9d8e52f94eff48c0d",
+              "kind": "verification",
+              "out_schema": "test-v1",
+              "part": "test",
+              "source": {
+                "spec_id": "SP2",
+                "revision": 2,
+                "module_id": "M2",
+                "module_name": "信息流推荐"
+              }
+            },
+            {
+              "id": "T9",
+              "title": "「信息流推荐」代码评审",
+              "phase": "评审",
+              "phase_id": "P4",
+              "level": 2,
+              "what": "对照验收条款评审「信息流推荐」的实现，给出问题清单与结论",
+              "how": "读实现与测试，检查重复逻辑/异常处理/硬编码/越界；阻塞问题必须列出",
+              "files": [],
+              "steps": [
+                {
+                  "title": "对照验收条款检查实现",
+                  "how": "逐条读代码，标出未满足项"
+                },
+                {
+                  "title": "检查代码质量",
+                  "how": "重复逻辑、异常处理、硬编码、越界与注入风险"
+                },
+                {
+                  "title": "给出结论",
+                  "how": "阻塞问题必须列出，最后给 pass/fail"
+                }
+              ],
+              "module": "信息流推荐",
+              "module_id": "M2",
+              "role": "评审",
+              "priority": "P0",
+              "estimate": 1,
+              "depends_on": [],
+              "acceptance": [
+                "首屏渲染 < 800ms",
+                "支持下拉刷新与无限滚动",
+                "同一用户 10 分钟内不重复推荐同一条"
+              ],
+              "acceptance_sources": [
+                "SP2/M2/acceptance/1",
+                "SP2/M2/acceptance/2",
+                "SP2/M2/acceptance/3"
+              ],
+              "spec_ref": "SP2/M2",
+              "spec_revision": 2,
+              "spec_hash": "3168ed156321edecedbd8272b7f1c2bca4222ac82c0fbed9d8e52f94eff48c0d",
+              "kind": "review",
+              "out_schema": "verify-v1",
+              "part": "review",
+              "source": {
+                "spec_id": "SP2",
+                "revision": 2,
+                "module_id": "M2",
+                "module_name": "信息流推荐"
+              }
+            },
+            {
+              "id": "T10",
+              "title": "「互动与通知」功能实现",
+              "phase": "编码",
+              "phase_id": "P2",
+              "level": 2,
+              "what": "交付「互动与通知」的可运行实现：点赞、评论、关注，以及对应的站内通知；满足 3 条验收（互动后 1 秒内产生通知；通知列表区分已读未读）",
+              "how": "Python 标准库实现：models.py 放数据模型与校验，service.py 放业务逻辑与接口路由，不引第三方依赖；完成后按验收条款逐条自测（取第一条条款写一条用例）",
+              "files": [
+                "src/m3/service.py",
+                "src/m3/models.py",
+                "tests/test_m3.py"
+              ],
+              "steps": [
+                {
+                  "title": "实现数据模型",
+                  "how": "写 src/m3/models.py"
+                },
+                {
+                  "title": "实现业务逻辑与接口",
+                  "how": "写 src/m3/service.py"
+                },
+                {
+                  "title": "补最小可运行用例",
+                  "how": "写 tests/test_m3.py 并跑通"
+                },
+                {
+                  "title": "按验收条款自测",
+                  "how": "逐条对照：互动后 1 秒内产生通知"
+                }
+              ],
+              "module": "互动与通知",
+              "module_id": "M3",
+              "role": "后端",
+              "priority": "P1",
+              "estimate": 4,
+              "depends_on": [],
+              "acceptance": [
+                "互动后 1 秒内产生通知",
+                "通知列表区分已读未读",
+                "取关后不再收到该用户通知"
+              ],
+              "acceptance_sources": [
+                "SP2/M3/acceptance/1",
+                "SP2/M3/acceptance/2",
+                "SP2/M3/acceptance/3"
+              ],
+              "spec_ref": "SP2/M3",
+              "spec_revision": 2,
+              "spec_hash": "3168ed156321edecedbd8272b7f1c2bca4222ac82c0fbed9d8e52f94eff48c0d",
+              "kind": "implementation",
+              "out_schema": "code-result-v1",
+              "part": "feature",
+              "source": {
+                "spec_id": "SP2",
+                "revision": 2,
+                "module_id": "M3",
+                "module_name": "互动与通知"
+              }
+            },
+            {
+              "id": "T11",
+              "title": "「互动与通知」单元测试与回归",
+              "phase": "测试",
+              "phase_id": "P3",
+              "level": 2,
+              "what": "为「互动与通知」补用例并跑通：正常 / 边界 / 异常",
+              "how": "pytest：tests/test_m3.py，命令 python -m pytest -q",
+              "files": [
+                "tests/test_m3.py"
+              ],
+              "steps": [
+                {
+                  "title": "设计用例矩阵",
+                  "how": "正常路径 / 边界 / 异常各至少 1 条"
+                },
+                {
+                  "title": "落地测试文件",
+                  "how": "写 tests/test_m3.py，用 pytest 断言"
+                },
+                {
+                  "title": "跑测试并记录证据",
+                  "how": "python -m pytest -q，把通过/失败数写进产物"
+                }
+              ],
+              "module": "互动与通知",
+              "module_id": "M3",
+              "role": "测试",
+              "priority": "P1",
+              "estimate": 2,
+              "depends_on": [],
+              "acceptance": [
+                "互动后 1 秒内产生通知",
+                "通知列表区分已读未读",
+                "取关后不再收到该用户通知"
+              ],
+              "acceptance_sources": [
+                "SP2/M3/acceptance/1",
+                "SP2/M3/acceptance/2",
+                "SP2/M3/acceptance/3"
+              ],
+              "spec_ref": "SP2/M3",
+              "spec_revision": 2,
+              "spec_hash": "3168ed156321edecedbd8272b7f1c2bca4222ac82c0fbed9d8e52f94eff48c0d",
+              "kind": "verification",
+              "out_schema": "test-v1",
+              "part": "test",
+              "source": {
+                "spec_id": "SP2",
+                "revision": 2,
+                "module_id": "M3",
+                "module_name": "互动与通知"
+              }
+            },
+            {
+              "id": "T12",
+              "title": "「互动与通知」代码评审",
+              "phase": "评审",
+              "phase_id": "P4",
+              "level": 2,
+              "what": "对照验收条款评审「互动与通知」的实现，给出问题清单与结论",
+              "how": "读实现与测试，检查重复逻辑/异常处理/硬编码/越界；阻塞问题必须列出",
+              "files": [],
+              "steps": [
+                {
+                  "title": "对照验收条款检查实现",
+                  "how": "逐条读代码，标出未满足项"
+                },
+                {
+                  "title": "检查代码质量",
+                  "how": "重复逻辑、异常处理、硬编码、越界与注入风险"
+                },
+                {
+                  "title": "给出结论",
+                  "how": "阻塞问题必须列出，最后给 pass/fail"
+                }
+              ],
+              "module": "互动与通知",
+              "module_id": "M3",
+              "role": "评审",
+              "priority": "P1",
+              "estimate": 1,
+              "depends_on": [],
+              "acceptance": [
+                "互动后 1 秒内产生通知",
+                "通知列表区分已读未读",
+                "取关后不再收到该用户通知"
+              ],
+              "acceptance_sources": [
+                "SP2/M3/acceptance/1",
+                "SP2/M3/acceptance/2",
+                "SP2/M3/acceptance/3"
+              ],
+              "spec_ref": "SP2/M3",
+              "spec_revision": 2,
+              "spec_hash": "3168ed156321edecedbd8272b7f1c2bca4222ac82c0fbed9d8e52f94eff48c0d",
+              "kind": "review",
+              "out_schema": "verify-v1",
+              "part": "review",
+              "source": {
+                "spec_id": "SP2",
+                "revision": 2,
+                "module_id": "M3",
+                "module_name": "互动与通知"
+              }
+            },
+            {
+              "id": "T13",
+              "title": "「内容审核与风控」方案与接口设计",
+              "phase": "设计",
+              "phase_id": "P1",
+              "level": 2,
+              "what": "给出「内容审核与风控」的接口、数据结构与错误码约定",
+              "how": "写 docs/design-m4.md：接口表、字段表、异常分支",
+              "files": [
+                "docs/design-m4.md"
+              ],
+              "steps": [
+                {
+                  "title": "定义接口与数据结构",
+                  "how": "写 docs/design-m4.md：接口表、字段表、错误码"
+                },
+                {
+                  "title": "对齐验收条款",
+                  "how": "逐条映射验收标准到接口或数据结构"
+                }
+              ],
+              "module": "内容审核与风控",
+              "module_id": "M4",
+              "role": "架构师",
+              "priority": "P0",
+              "estimate": 2,
+              "depends_on": [],
+              "acceptance": [
+                "输出接口与数据结构说明",
+                "与规格验收条款逐条对齐"
+              ],
+              "acceptance_sources": [
+                "SP2/M4/derived/design",
+                "SP2/M4/acceptance"
+              ],
+              "spec_ref": "SP2/M4",
+              "spec_revision": 2,
+              "spec_hash": "3168ed156321edecedbd8272b7f1c2bca4222ac82c0fbed9d8e52f94eff48c0d",
+              "kind": "design",
+              "out_schema": "design-v1",
+              "part": "skeleton",
+              "source": {
+                "spec_id": "SP2",
+                "revision": 2,
+                "module_id": "M4",
+                "module_name": "内容审核与风控"
+              }
+            },
+            {
+              "id": "T14",
+              "title": "「内容审核与风控」功能实现",
+              "phase": "编码",
+              "phase_id": "P2",
+              "level": 2,
+              "what": "交付「内容审核与风控」的可运行实现：文本敏感词与图片机审，命中转人工复核队列；满足 3 条验收（敏感词命中率 ≥ 95%；人工复核队列支持指派与结论回写）",
+              "how": "Python 标准库实现：models.py 放数据模型与校验，service.py 放业务逻辑与接口路由，不引第三方依赖；完成后按验收条款逐条自测（取第一条条款写一条用例）",
+              "files": [
+                "src/m4/service.py",
+                "src/m4/models.py",
+                "tests/test_m4.py"
+              ],
+              "steps": [
+                {
+                  "title": "实现数据模型",
+                  "how": "写 src/m4/models.py"
+                },
+                {
+                  "title": "实现业务逻辑与接口",
+                  "how": "写 src/m4/service.py"
+                },
+                {
+                  "title": "补最小可运行用例",
+                  "how": "写 tests/test_m4.py 并跑通"
+                },
+                {
+                  "title": "按验收条款自测",
+                  "how": "逐条对照：敏感词命中率 ≥ 95%"
+                }
+              ],
+              "module": "内容审核与风控",
+              "module_id": "M4",
+              "role": "后端",
+              "priority": "P0",
+              "estimate": 6,
+              "depends_on": [],
+              "acceptance": [
+                "敏感词命中率 ≥ 95%",
+                "人工复核队列支持指派与结论回写",
+                "每次审核动作写入审计日志"
+              ],
+              "acceptance_sources": [
+                "SP2/M4/acceptance/1",
+                "SP2/M4/acceptance/2",
+                "SP2/M4/acceptance/3"
+              ],
+              "spec_ref": "SP2/M4",
+              "spec_revision": 2,
+              "spec_hash": "3168ed156321edecedbd8272b7f1c2bca4222ac82c0fbed9d8e52f94eff48c0d",
+              "kind": "implementation",
+              "out_schema": "code-result-v1",
+              "part": "feature",
+              "source": {
+                "spec_id": "SP2",
+                "revision": 2,
+                "module_id": "M4",
+                "module_name": "内容审核与风控"
+              }
+            },
+            {
+              "id": "T15",
+              "title": "「内容审核与风控」单元测试与回归",
+              "phase": "测试",
+              "phase_id": "P3",
+              "level": 2,
+              "what": "为「内容审核与风控」补用例并跑通：正常 / 边界 / 异常",
+              "how": "pytest：tests/test_m4.py，命令 python -m pytest -q",
+              "files": [
+                "tests/test_m4.py"
+              ],
+              "steps": [
+                {
+                  "title": "设计用例矩阵",
+                  "how": "正常路径 / 边界 / 异常各至少 1 条"
+                },
+                {
+                  "title": "落地测试文件",
+                  "how": "写 tests/test_m4.py，用 pytest 断言"
+                },
+                {
+                  "title": "跑测试并记录证据",
+                  "how": "python -m pytest -q，把通过/失败数写进产物"
+                }
+              ],
+              "module": "内容审核与风控",
+              "module_id": "M4",
+              "role": "测试",
+              "priority": "P0",
+              "estimate": 2,
+              "depends_on": [],
+              "acceptance": [
+                "敏感词命中率 ≥ 95%",
+                "人工复核队列支持指派与结论回写",
+                "每次审核动作写入审计日志"
+              ],
+              "acceptance_sources": [
+                "SP2/M4/acceptance/1",
+                "SP2/M4/acceptance/2",
+                "SP2/M4/acceptance/3"
+              ],
+              "spec_ref": "SP2/M4",
+              "spec_revision": 2,
+              "spec_hash": "3168ed156321edecedbd8272b7f1c2bca4222ac82c0fbed9d8e52f94eff48c0d",
+              "kind": "verification",
+              "out_schema": "test-v1",
+              "part": "test",
+              "source": {
+                "spec_id": "SP2",
+                "revision": 2,
+                "module_id": "M4",
+                "module_name": "内容审核与风控"
+              }
+            },
+            {
+              "id": "T16",
+              "title": "「内容审核与风控」代码评审",
+              "phase": "评审",
+              "phase_id": "P4",
+              "level": 2,
+              "what": "对照验收条款评审「内容审核与风控」的实现，给出问题清单与结论",
+              "how": "读实现与测试，检查重复逻辑/异常处理/硬编码/越界；阻塞问题必须列出",
+              "files": [],
+              "steps": [
+                {
+                  "title": "对照验收条款检查实现",
+                  "how": "逐条读代码，标出未满足项"
+                },
+                {
+                  "title": "检查代码质量",
+                  "how": "重复逻辑、异常处理、硬编码、越界与注入风险"
+                },
+                {
+                  "title": "给出结论",
+                  "how": "阻塞问题必须列出，最后给 pass/fail"
+                }
+              ],
+              "module": "内容审核与风控",
+              "module_id": "M4",
+              "role": "评审",
+              "priority": "P0",
+              "estimate": 1,
+              "depends_on": [],
+              "acceptance": [
+                "敏感词命中率 ≥ 95%",
+                "人工复核队列支持指派与结论回写",
+                "每次审核动作写入审计日志"
+              ],
+              "acceptance_sources": [
+                "SP2/M4/acceptance/1",
+                "SP2/M4/acceptance/2",
+                "SP2/M4/acceptance/3"
+              ],
+              "spec_ref": "SP2/M4",
+              "spec_revision": 2,
+              "spec_hash": "3168ed156321edecedbd8272b7f1c2bca4222ac82c0fbed9d8e52f94eff48c0d",
+              "kind": "review",
+              "out_schema": "verify-v1",
+              "part": "review",
+              "source": {
+                "spec_id": "SP2",
+                "revision": 2,
+                "module_id": "M4",
+                "module_name": "内容审核与风控"
+              }
+            },
+            {
+              "id": "T17",
+              "title": "集成联调与整体验收",
+              "phase": "测试",
+              "phase_id": "P3",
+              "level": 2,
+              "what": "把所有模块装到一起，跑端到端主流程并回归",
+              "how": "python -m pytest -q 跑全量用例；按约束逐条核对",
+              "files": [
+                "tests/test_integration.py"
+              ],
+              "steps": [
+                {
+                  "title": "装配所有模块",
+                  "how": "确认入口能同时加载各模块的接口"
+                },
+                {
+                  "title": "端到端跑主流程",
+                  "how": "python -m pytest -q 跑一遍全量用例"
+                },
+                {
+                  "title": "整理交付清单",
+                  "how": "列出产出文件、启动方式、遗留风险"
+                }
+              ],
+              "module": "",
+              "module_id": "",
+              "role": "测试",
+              "priority": "P0",
+              "estimate": 2,
+              "depends_on": [],
+              "acceptance": [
+                "端到端跑通主流程",
+                "回归既有功能无退化",
+                "内容合规须满足《网络信息内容生态治理规定》",
+                "灰度发布，支持按用户分桶与一键回滚"
+              ],
+              "acceptance_sources": [
+                "SP2/derived/integration-e2e",
+                "SP2/derived/integration-regression",
+                "SP2/constraints/1",
+                "SP2/constraints/2"
+              ],
+              "spec_ref": "SP2",
+              "spec_revision": 2,
+              "spec_hash": "3168ed156321edecedbd8272b7f1c2bca4222ac82c0fbed9d8e52f94eff48c0d",
+              "kind": "integration",
+              "out_schema": "test-v1",
+              "part": "integrate",
+              "source": {
+                "spec_id": "SP2",
+                "revision": 2,
+                "module_id": "",
+                "module_name": ""
+              }
+            },
+            {
+              "id": "T18",
+              "title": "交付清单与上线说明",
+              "phase": "交付",
+              "phase_id": "P5",
+              "level": 2,
+              "what": "输出交付清单：怎么启动、怎么配置、还有哪些风险",
+              "how": "写 README 的「运行方式」与「已知限制」两节",
+              "files": [
+                "README.md"
+              ],
+              "steps": [
+                {
+                  "title": "装配所有模块",
+                  "how": "确认入口能同时加载各模块的接口"
+                },
+                {
+                  "title": "端到端跑主流程",
+                  "how": "python -m pytest -q 跑一遍全量用例"
+                },
+                {
+                  "title": "整理交付清单",
+                  "how": "列出产出文件、启动方式、遗留风险"
+                }
+              ],
+              "module": "",
+              "module_id": "",
+              "role": "架构师",
+              "priority": "P1",
+              "estimate": 1,
+              "depends_on": [],
+              "acceptance": [
+                "启动方式、配置文件、遗留风险写清楚"
+              ],
+              "acceptance_sources": [
+                "SP2/derived/delivery"
+              ],
+              "spec_ref": "SP2",
+              "spec_revision": 2,
+              "spec_hash": "3168ed156321edecedbd8272b7f1c2bca4222ac82c0fbed9d8e52f94eff48c0d",
+              "kind": "delivery",
+              "out_schema": "verify-v1",
+              "part": "delivery",
+              "source": {
+                "spec_id": "SP2",
+                "revision": 2,
+                "module_id": "",
+                "module_name": ""
+              }
+            }
+          ],
+          "concurrency_limit": 3,
+          "template": "default",
+          "nodes": [
+            {
+              "id": "N1",
+              "type": "start",
+              "role": "system",
+              "name": "需求输入",
+              "deps": [],
+              "max_retries": 0,
+              "description": "做一个图文内容社区：能发笔记、看推荐流、点赞评论关注、内容合规审核",
+              "part": "skeleton",
+              "part_label": "工程骨架",
+              "pos": {
+                "x": 44,
+                "y": 86
+              }
+            },
+            {
+              "id": "N2",
+              "type": "agent",
+              "role": "pm",
+              "name": "需求分析与拆分",
+              "deps": [
+                "N1"
+              ],
+              "max_retries": 2,
+              "out_schema": "prd-v1",
+              "part": "skeleton",
+              "part_label": "工程骨架",
+              "pos": {
+                "x": 294,
+                "y": 86
+              }
+            },
+            {
+              "id": "N3",
+              "type": "agent",
+              "role": "architect",
+              "name": "架构与接口设计",
+              "deps": [
+                "N2"
+              ],
+              "max_retries": 2,
+              "out_schema": "design-v1",
+              "part": "skeleton",
+              "part_label": "工程骨架",
+              "pos": {
+                "x": 294,
+                "y": 186
+              }
+            },
+            {
+              "id": "N4",
+              "type": "agent",
+              "role": "coder",
+              "name": "T1 工程骨架与环境搭建",
+              "deps": [
+                "N3"
+              ],
+              "max_retries": 3,
+              "out_schema": "code-result-v1",
+              "task_id": "T1",
+              "module": "",
+              "spec_ref": "SP2",
+              "priority": "P0",
+              "estimate": 1,
+              "acceptance": [
+                "构建脚本可一键起服务",
+                "目录结构与模板、规格存放就位"
+              ],
+              "acceptance_sources": [
+                "SP2/derived/engineering-skeleton",
+                "SP2/derived/engineering-skeleton"
+              ],
+              "kind": "foundation",
+              "part": "skeleton",
+              "part_label": "工程骨架",
+              "ai": "",
+              "spec_revision": 2,
+              "spec_hash": "3168ed156321edecedbd8272b7f1c2bca4222ac82c0fbed9d8e52f94eff48c0d",
+              "pos": {
+                "x": 294,
+                "y": 286
+              }
+            },
+            {
+              "id": "N5",
+              "type": "agent",
+              "role": "architect",
+              "name": "T2 「账号与内容发布」方案与接口设计",
+              "deps": [
+                "N4"
+              ],
+              "max_retries": 3,
+              "out_schema": "design-v1",
+              "task_id": "T2",
+              "module": "账号与内容发布",
+              "spec_ref": "SP2/M1",
+              "priority": "P0",
+              "estimate": 2,
+              "acceptance": [
+                "输出接口与数据结构说明",
+                "与规格验收条款逐条对齐"
+              ],
+              "acceptance_sources": [
+                "SP2/M1/derived/design",
+                "SP2/M1/acceptance"
+              ],
+              "kind": "design",
+              "part": "skeleton",
+              "part_label": "工程骨架",
+              "ai": "",
+              "spec_revision": 2,
+              "spec_hash": "3168ed156321edecedbd8272b7f1c2bca4222ac82c0fbed9d8e52f94eff48c0d",
+              "pos": {
+                "x": 294,
+                "y": 386
+              }
+            },
+            {
+              "id": "N6",
+              "type": "agent",
+              "role": "coder",
+              "name": "T3 「账号与内容发布」功能实现",
+              "deps": [
+                "N5",
+                "N10"
+              ],
+              "max_retries": 3,
+              "out_schema": "code-result-v1",
+              "task_id": "T3",
+              "module": "账号与内容发布",
+              "spec_ref": "SP2/M1",
+              "priority": "P0",
+              "estimate": 6,
+              "acceptance": [
+                "支持图文草稿保存与恢复",
+                "发布成功后 3 秒内可被检索到",
+                "违规内容在发布环节即被拦截"
+              ],
+              "acceptance_sources": [
+                "SP2/M1/acceptance/1",
+                "SP2/M1/acceptance/2",
+                "SP2/M1/acceptance/3"
+              ],
+              "kind": "implementation",
+              "part": "feature",
+              "part_label": "功能实现",
+              "ai": "",
+              "spec_revision": 2,
+              "spec_hash": "3168ed156321edecedbd8272b7f1c2bca4222ac82c0fbed9d8e52f94eff48c0d",
+              "pos": {
+                "x": 1174,
+                "y": 676
+              }
+            },
+            {
+              "id": "N7",
+              "type": "agent",
+              "role": "tester",
+              "name": "T4 「账号与内容发布」单元测试与回归",
+              "deps": [
+                "N6"
+              ],
+              "max_retries": 3,
+              "out_schema": "test-v1",
+              "task_id": "T4",
+              "module": "账号与内容发布",
+              "spec_ref": "SP2/M1",
+              "priority": "P0",
+              "estimate": 2,
+              "acceptance": [
+                "支持图文草稿保存与恢复",
+                "发布成功后 3 秒内可被检索到",
+                "违规内容在发布环节即被拦截"
+              ],
+              "acceptance_sources": [
+                "SP2/M1/acceptance/1",
+                "SP2/M1/acceptance/2",
+                "SP2/M1/acceptance/3"
+              ],
+              "kind": "verification",
+              "part": "test",
+              "part_label": "测试验证",
+              "ai": "",
+              "spec_revision": 2,
+              "spec_hash": "3168ed156321edecedbd8272b7f1c2bca4222ac82c0fbed9d8e52f94eff48c0d",
+              "pos": {
+                "x": 830,
+                "y": 86
+              }
+            },
+            {
+              "id": "N8",
+              "type": "agent",
+              "role": "reviewer",
+              "name": "T5 「账号与内容发布」代码评审",
+              "deps": [
+                "N7"
+              ],
+              "max_retries": 3,
+              "out_schema": "verify-v1",
+              "task_id": "T5",
+              "module": "账号与内容发布",
+              "spec_ref": "SP2/M1",
+              "priority": "P0",
+              "estimate": 1,
+              "acceptance": [
+                "支持图文草稿保存与恢复",
+                "发布成功后 3 秒内可被检索到",
+                "违规内容在发布环节即被拦截"
+              ],
+              "acceptance_sources": [
+                "SP2/M1/acceptance/1",
+                "SP2/M1/acceptance/2",
+                "SP2/M1/acceptance/3"
+              ],
+              "kind": "review",
+              "part": "review",
+              "part_label": "代码评审",
+              "ai": "",
+              "spec_revision": 2,
+              "spec_hash": "3168ed156321edecedbd8272b7f1c2bca4222ac82c0fbed9d8e52f94eff48c0d",
+              "pos": {
+                "x": 1098,
+                "y": 86
+              }
+            },
+            {
+              "id": "N9",
+              "type": "agent",
+              "role": "architect",
+              "name": "T6 「信息流推荐」方案与接口设计",
+              "deps": [
+                "N4"
+              ],
+              "max_retries": 3,
+              "out_schema": "design-v1",
+              "task_id": "T6",
+              "module": "信息流推荐",
+              "spec_ref": "SP2/M2",
+              "priority": "P0",
+              "estimate": 2,
+              "acceptance": [
+                "输出接口与数据结构说明",
+                "与规格验收条款逐条对齐"
+              ],
+              "acceptance_sources": [
+                "SP2/M2/derived/design",
+                "SP2/M2/acceptance"
+              ],
+              "kind": "design",
+              "part": "skeleton",
+              "part_label": "工程骨架",
+              "ai": "",
+              "spec_revision": 2,
+              "spec_hash": "3168ed156321edecedbd8272b7f1c2bca4222ac82c0fbed9d8e52f94eff48c0d",
+              "pos": {
+                "x": 294,
+                "y": 486
+              }
+            },
+            {
+              "id": "N10",
+              "type": "agent",
+              "role": "coder",
+              "name": "T7 「信息流推荐」功能实现",
+              "deps": [
+                "N9"
+              ],
+              "max_retries": 3,
+              "out_schema": "code-result-v1",
+              "task_id": "T7",
+              "module": "信息流推荐",
+              "spec_ref": "SP2/M2",
+              "priority": "P0",
+              "estimate": 6,
+              "acceptance": [
+                "首屏渲染 < 800ms",
+                "支持下拉刷新与无限滚动",
+                "同一用户 10 分钟内不重复推荐同一条"
+              ],
+              "acceptance_sources": [
+                "SP2/M2/acceptance/1",
+                "SP2/M2/acceptance/2",
+                "SP2/M2/acceptance/3"
+              ],
+              "kind": "implementation",
+              "part": "feature",
+              "part_label": "功能实现",
+              "ai": "",
+              "spec_revision": 2,
+              "spec_hash": "3168ed156321edecedbd8272b7f1c2bca4222ac82c0fbed9d8e52f94eff48c0d",
+              "pos": {
+                "x": 562,
+                "y": 186
+              }
+            },
+            {
+              "id": "N11",
+              "type": "agent",
+              "role": "tester",
+              "name": "T8 「信息流推荐」单元测试与回归",
+              "deps": [
+                "N10"
+              ],
+              "max_retries": 3,
+              "out_schema": "test-v1",
+              "task_id": "T8",
+              "module": "信息流推荐",
+              "spec_ref": "SP2/M2",
+              "priority": "P0",
+              "estimate": 2,
+              "acceptance": [
+                "首屏渲染 < 800ms",
+                "支持下拉刷新与无限滚动",
+                "同一用户 10 分钟内不重复推荐同一条"
+              ],
+              "acceptance_sources": [
+                "SP2/M2/acceptance/1",
+                "SP2/M2/acceptance/2",
+                "SP2/M2/acceptance/3"
+              ],
+              "kind": "verification",
+              "part": "test",
+              "part_label": "测试验证",
+              "ai": "",
+              "spec_revision": 2,
+              "spec_hash": "3168ed156321edecedbd8272b7f1c2bca4222ac82c0fbed9d8e52f94eff48c0d",
+              "pos": {
+                "x": 830,
+                "y": 186
+              }
+            },
+            {
+              "id": "N12",
+              "type": "agent",
+              "role": "reviewer",
+              "name": "T9 「信息流推荐」代码评审",
+              "deps": [
+                "N11"
+              ],
+              "max_retries": 3,
+              "out_schema": "verify-v1",
+              "task_id": "T9",
+              "module": "信息流推荐",
+              "spec_ref": "SP2/M2",
+              "priority": "P0",
+              "estimate": 1,
+              "acceptance": [
+                "首屏渲染 < 800ms",
+                "支持下拉刷新与无限滚动",
+                "同一用户 10 分钟内不重复推荐同一条"
+              ],
+              "acceptance_sources": [
+                "SP2/M2/acceptance/1",
+                "SP2/M2/acceptance/2",
+                "SP2/M2/acceptance/3"
+              ],
+              "kind": "review",
+              "part": "review",
+              "part_label": "代码评审",
+              "ai": "",
+              "spec_revision": 2,
+              "spec_hash": "3168ed156321edecedbd8272b7f1c2bca4222ac82c0fbed9d8e52f94eff48c0d",
+              "pos": {
+                "x": 1098,
+                "y": 186
+              }
+            },
+            {
+              "id": "N13",
+              "type": "agent",
+              "role": "coder",
+              "name": "T10 「互动与通知」功能实现",
+              "deps": [
+                "N4"
+              ],
+              "max_retries": 3,
+              "out_schema": "code-result-v1",
+              "task_id": "T10",
+              "module": "互动与通知",
+              "spec_ref": "SP2/M3",
+              "priority": "P1",
+              "estimate": 4,
+              "acceptance": [
+                "互动后 1 秒内产生通知",
+                "通知列表区分已读未读",
+                "取关后不再收到该用户通知"
+              ],
+              "acceptance_sources": [
+                "SP2/M3/acceptance/1",
+                "SP2/M3/acceptance/2",
+                "SP2/M3/acceptance/3"
+              ],
+              "kind": "implementation",
+              "part": "feature",
+              "part_label": "功能实现",
+              "ai": "",
+              "spec_revision": 2,
+              "spec_hash": "3168ed156321edecedbd8272b7f1c2bca4222ac82c0fbed9d8e52f94eff48c0d",
+              "pos": {
+                "x": 562,
+                "y": 286
+              }
+            },
+            {
+              "id": "N14",
+              "type": "agent",
+              "role": "tester",
+              "name": "T11 「互动与通知」单元测试与回归",
+              "deps": [
+                "N13"
+              ],
+              "max_retries": 3,
+              "out_schema": "test-v1",
+              "task_id": "T11",
+              "module": "互动与通知",
+              "spec_ref": "SP2/M3",
+              "priority": "P1",
+              "estimate": 2,
+              "acceptance": [
+                "互动后 1 秒内产生通知",
+                "通知列表区分已读未读",
+                "取关后不再收到该用户通知"
+              ],
+              "acceptance_sources": [
+                "SP2/M3/acceptance/1",
+                "SP2/M3/acceptance/2",
+                "SP2/M3/acceptance/3"
+              ],
+              "kind": "verification",
+              "part": "test",
+              "part_label": "测试验证",
+              "ai": "",
+              "spec_revision": 2,
+              "spec_hash": "3168ed156321edecedbd8272b7f1c2bca4222ac82c0fbed9d8e52f94eff48c0d",
+              "pos": {
+                "x": 830,
+                "y": 286
+              }
+            },
+            {
+              "id": "N15",
+              "type": "agent",
+              "role": "reviewer",
+              "name": "T12 「互动与通知」代码评审",
+              "deps": [
+                "N14"
+              ],
+              "max_retries": 3,
+              "out_schema": "verify-v1",
+              "task_id": "T12",
+              "module": "互动与通知",
+              "spec_ref": "SP2/M3",
+              "priority": "P1",
+              "estimate": 1,
+              "acceptance": [
+                "互动后 1 秒内产生通知",
+                "通知列表区分已读未读",
+                "取关后不再收到该用户通知"
+              ],
+              "acceptance_sources": [
+                "SP2/M3/acceptance/1",
+                "SP2/M3/acceptance/2",
+                "SP2/M3/acceptance/3"
+              ],
+              "kind": "review",
+              "part": "review",
+              "part_label": "代码评审",
+              "ai": "",
+              "spec_revision": 2,
+              "spec_hash": "3168ed156321edecedbd8272b7f1c2bca4222ac82c0fbed9d8e52f94eff48c0d",
+              "pos": {
+                "x": 1098,
+                "y": 286
+              }
+            },
+            {
+              "id": "N16",
+              "type": "agent",
+              "role": "architect",
+              "name": "T13 「内容审核与风控」方案与接口设计",
+              "deps": [
+                "N4"
+              ],
+              "max_retries": 3,
+              "out_schema": "design-v1",
+              "task_id": "T13",
+              "module": "内容审核与风控",
+              "spec_ref": "SP2/M4",
+              "priority": "P0",
+              "estimate": 2,
+              "acceptance": [
+                "输出接口与数据结构说明",
+                "与规格验收条款逐条对齐"
+              ],
+              "acceptance_sources": [
+                "SP2/M4/derived/design",
+                "SP2/M4/acceptance"
+              ],
+              "kind": "design",
+              "part": "skeleton",
+              "part_label": "工程骨架",
+              "ai": "",
+              "spec_revision": 2,
+              "spec_hash": "3168ed156321edecedbd8272b7f1c2bca4222ac82c0fbed9d8e52f94eff48c0d",
+              "pos": {
+                "x": 294,
+                "y": 586
+              }
+            },
+            {
+              "id": "N17",
+              "type": "agent",
+              "role": "coder",
+              "name": "T14 「内容审核与风控」功能实现",
+              "deps": [
+                "N16"
+              ],
+              "max_retries": 3,
+              "out_schema": "code-result-v1",
+              "task_id": "T14",
+              "module": "内容审核与风控",
+              "spec_ref": "SP2/M4",
+              "priority": "P0",
+              "estimate": 6,
+              "acceptance": [
+                "敏感词命中率 ≥ 95%",
+                "人工复核队列支持指派与结论回写",
+                "每次审核动作写入审计日志"
+              ],
+              "acceptance_sources": [
+                "SP2/M4/acceptance/1",
+                "SP2/M4/acceptance/2",
+                "SP2/M4/acceptance/3"
+              ],
+              "kind": "implementation",
+              "part": "feature",
+              "part_label": "功能实现",
+              "ai": "",
+              "spec_revision": 2,
+              "spec_hash": "3168ed156321edecedbd8272b7f1c2bca4222ac82c0fbed9d8e52f94eff48c0d",
+              "pos": {
+                "x": 562,
+                "y": 386
+              }
+            },
+            {
+              "id": "N18",
+              "type": "agent",
+              "role": "tester",
+              "name": "T15 「内容审核与风控」单元测试与回归",
+              "deps": [
+                "N17"
+              ],
+              "max_retries": 3,
+              "out_schema": "test-v1",
+              "task_id": "T15",
+              "module": "内容审核与风控",
+              "spec_ref": "SP2/M4",
+              "priority": "P0",
+              "estimate": 2,
+              "acceptance": [
+                "敏感词命中率 ≥ 95%",
+                "人工复核队列支持指派与结论回写",
+                "每次审核动作写入审计日志"
+              ],
+              "acceptance_sources": [
+                "SP2/M4/acceptance/1",
+                "SP2/M4/acceptance/2",
+                "SP2/M4/acceptance/3"
+              ],
+              "kind": "verification",
+              "part": "test",
+              "part_label": "测试验证",
+              "ai": "",
+              "spec_revision": 2,
+              "spec_hash": "3168ed156321edecedbd8272b7f1c2bca4222ac82c0fbed9d8e52f94eff48c0d",
+              "pos": {
+                "x": 830,
+                "y": 386
+              }
+            },
+            {
+              "id": "N19",
+              "type": "agent",
+              "role": "reviewer",
+              "name": "T16 「内容审核与风控」代码评审",
+              "deps": [
+                "N18"
+              ],
+              "max_retries": 3,
+              "out_schema": "verify-v1",
+              "task_id": "T16",
+              "module": "内容审核与风控",
+              "spec_ref": "SP2/M4",
+              "priority": "P0",
+              "estimate": 1,
+              "acceptance": [
+                "敏感词命中率 ≥ 95%",
+                "人工复核队列支持指派与结论回写",
+                "每次审核动作写入审计日志"
+              ],
+              "acceptance_sources": [
+                "SP2/M4/acceptance/1",
+                "SP2/M4/acceptance/2",
+                "SP2/M4/acceptance/3"
+              ],
+              "kind": "review",
+              "part": "review",
+              "part_label": "代码评审",
+              "ai": "",
+              "spec_revision": 2,
+              "spec_hash": "3168ed156321edecedbd8272b7f1c2bca4222ac82c0fbed9d8e52f94eff48c0d",
+              "pos": {
+                "x": 1098,
+                "y": 386
+              }
+            },
+            {
+              "id": "N20",
+              "type": "agent",
+              "role": "tester",
+              "name": "T17 集成联调与整体验收",
+              "deps": [
+                "N8",
+                "N12",
+                "N15",
+                "N19"
+              ],
+              "max_retries": 3,
+              "out_schema": "test-v1",
+              "task_id": "T17",
+              "module": "",
+              "spec_ref": "SP2",
+              "priority": "P0",
+              "estimate": 2,
+              "acceptance": [
+                "端到端跑通主流程",
+                "回归既有功能无退化",
+                "内容合规须满足《网络信息内容生态治理规定》",
+                "灰度发布，支持按用户分桶与一键回滚"
+              ],
+              "acceptance_sources": [
+                "SP2/derived/integration-e2e",
+                "SP2/derived/integration-regression",
+                "SP2/constraints/1",
+                "SP2/constraints/2"
+              ],
+              "kind": "integration",
+              "part": "integrate",
+              "part_label": "集成验收",
+              "ai": "",
+              "spec_revision": 2,
+              "spec_hash": "3168ed156321edecedbd8272b7f1c2bca4222ac82c0fbed9d8e52f94eff48c0d",
+              "pos": {
+                "x": 830,
+                "y": 486
+              }
+            },
+            {
+              "id": "N21",
+              "type": "agent",
+              "role": "architect",
+              "name": "T18 交付清单与上线说明",
+              "deps": [
+                "N20"
+              ],
+              "max_retries": 3,
+              "out_schema": "verify-v1",
+              "task_id": "T18",
+              "module": "",
+              "spec_ref": "SP2",
+              "priority": "P1",
+              "estimate": 1,
+              "acceptance": [
+                "启动方式、配置文件、遗留风险写清楚"
+              ],
+              "acceptance_sources": [
+                "SP2/derived/delivery"
+              ],
+              "kind": "delivery",
+              "part": "delivery",
+              "part_label": "交付",
+              "ai": "",
+              "spec_revision": 2,
+              "spec_hash": "3168ed156321edecedbd8272b7f1c2bca4222ac82c0fbed9d8e52f94eff48c0d",
+              "pos": {
+                "x": 1366,
+                "y": 86
+              }
+            },
+            {
+              "id": "N22",
+              "type": "condition",
+              "role": "qa",
+              "name": "质量门判定",
+              "deps": [
+                "N21"
+              ],
+              "max_retries": 0,
+              "expression": "qa_score >= 80",
+              "part": "test",
+              "part_label": "测试验证",
+              "pos": {
+                "x": 1366,
+                "y": 186
+              }
+            },
+            {
+              "id": "N23",
+              "type": "agent",
+              "role": "qa",
+              "name": "回归测试",
+              "deps": [
+                "N22"
+              ],
+              "max_retries": 2,
+              "out_schema": "test-v1",
+              "part": "test",
+              "part_label": "测试验证",
+              "pos": {
+                "x": 1366,
+                "y": 286
+              }
+            },
+            {
+              "id": "N24",
+              "type": "agent",
+              "role": "coder",
+              "name": "针对性修复与重构",
+              "deps": [
+                "N22"
+              ],
+              "max_retries": 2,
+              "out_schema": "code-result-v1",
+              "part": "feature",
+              "part_label": "功能实现",
+              "pos": {
+                "x": 1366,
+                "y": 386
+              }
+            },
+            {
+              "id": "N25",
+              "type": "agent",
+              "role": "qa",
+              "name": "合并验证",
+              "deps": [
+                "N23",
+                "N24"
+              ],
+              "max_retries": 2,
+              "out_schema": "verify-v1",
+              "join": "any",
+              "part": "integrate",
+              "part_label": "集成验收",
+              "pos": {
+                "x": 1366,
+                "y": 486
+              }
+            },
+            {
+              "id": "N26",
+              "type": "agent",
+              "role": "qa",
+              "name": "安全与合规评审",
+              "deps": [
+                "N25"
+              ],
+              "max_retries": 2,
+              "out_schema": "scan-v1",
+              "part": "review",
+              "part_label": "代码评审",
+              "pos": {
+                "x": 1366,
+                "y": 586
+              }
+            },
+            {
+              "id": "N27",
+              "type": "approval",
+              "role": "human",
+              "name": "上线审批",
+              "deps": [
+                "N26"
+              ],
+              "max_retries": 0,
+              "part": "delivery",
+              "part_label": "交付",
+              "pos": {
+                "x": 1366,
+                "y": 686
+              }
+            },
+            {
+              "id": "N28",
+              "type": "end",
+              "role": "system",
+              "name": "交付完成",
+              "deps": [
+                "N27"
+              ],
+              "max_retries": 0,
+              "part": "delivery",
+              "part_label": "交付",
+              "pos": {
+                "x": 1616,
+                "y": 86
+              }
+            },
+            {
+              "id": "N29",
+              "type": "agent",
+              "deps": [
+                "N6"
+              ],
+              "pos": {
+                "x": 970,
+                "y": 995
+              },
+              "name": "交付前复核",
+              "role": "qa",
+              "max_retries": 2,
+              "out_schema": "default-v1"
+            }
+          ],
+          "edges": [
+            {
+              "source": "N1",
+              "target": "N2"
+            },
+            {
+              "source": "N2",
+              "target": "N3"
+            },
+            {
+              "source": "N3",
+              "target": "N4"
+            },
+            {
+              "source": "N4",
+              "target": "N5"
+            },
+            {
+              "source": "N5",
+              "target": "N6"
+            },
+            {
+              "source": "N6",
+              "target": "N7"
+            },
+            {
+              "source": "N7",
+              "target": "N8"
+            },
+            {
+              "source": "N4",
+              "target": "N9"
+            },
+            {
+              "source": "N9",
+              "target": "N10"
+            },
+            {
+              "source": "N10",
+              "target": "N11"
+            },
+            {
+              "source": "N11",
+              "target": "N12"
+            },
+            {
+              "source": "N4",
+              "target": "N13"
+            },
+            {
+              "source": "N13",
+              "target": "N14"
+            },
+            {
+              "source": "N14",
+              "target": "N15"
+            },
+            {
+              "source": "N4",
+              "target": "N16"
+            },
+            {
+              "source": "N16",
+              "target": "N17"
+            },
+            {
+              "source": "N17",
+              "target": "N18"
+            },
+            {
+              "source": "N18",
+              "target": "N19"
+            },
+            {
+              "source": "N8",
+              "target": "N20"
+            },
+            {
+              "source": "N12",
+              "target": "N20"
+            },
+            {
+              "source": "N15",
+              "target": "N20"
+            },
+            {
+              "source": "N19",
+              "target": "N20"
+            },
+            {
+              "source": "N20",
+              "target": "N21"
+            },
+            {
+              "source": "N21",
+              "target": "N22"
+            },
+            {
+              "source": "N22",
+              "target": "N23",
+              "label": "true"
+            },
+            {
+              "source": "N22",
+              "target": "N24",
+              "label": "false"
+            },
+            {
+              "source": "N23",
+              "target": "N25"
+            },
+            {
+              "source": "N24",
+              "target": "N25"
+            },
+            {
+              "source": "N25",
+              "target": "N26"
+            },
+            {
+              "source": "N26",
+              "target": "N27"
+            },
+            {
+              "source": "N27",
+              "target": "N28"
+            },
+            {
+              "source": "N6",
+              "target": "N29"
+            },
+            {
+              "source": "N10",
+              "target": "N6"
+            }
+          ]
+        }
       }
     ],
     "draft": {
       "definition": {
         "workflow_id": "wf_login_001",
-        "name": "运维工单系统 v1 · 任务编排",
-        "version": "v2+草稿",
-        "description": "面向运维值班同学的工单系统，先做登录与工单流转。",
-        "requirement": "面向运维值班同学的工单系统，先做登录与工单流转。",
-        "spec_id": "SP5",
-        "spec_revision": 2,
-        "spec_hash": "0c6b18f12a9ee4c0d9aafe93b6c78aba76dc64ab9143f014b41a87bb12e8353e",
+        "name": "工单系统 v1 · 任务编排",
+        "version": "v3+草稿",
+        "description": "验收：错误提示明确",
+        "requirement": "验收：错误提示明确",
+        "spec_id": "SP6",
+        "spec_revision": 1,
+        "spec_hash": "60b4959181fc420359fe2d421ae4ecc1d5a61a07adbb549750306189f1fc0a66",
         "spec_snapshot": {
-          "id": "SP5",
-          "name": "运维工单系统 v1",
-          "summary": "面向运维值班同学的工单系统，先做登录与工单流转。",
-          "body": "# 运维工单系统 v1\n\n面向运维值班同学的工单系统，先做登录与工单流转。\n\n## 模块\n\n### 登录：账号密码 + 短信验证码\n账号密码登录，连续错误 5 次锁定。\n验收：错误提示明确\n验收：锁定 5 次后可自助解锁\n\n### 工单流转\n创建、指派、关闭工单，全程留痕。\n- [ ] 状态变更写入审计日志\n验收：越权指派被拒绝\n\n## 全局约束\n- 不新增第三方依赖\n- 密码只存 hash",
+          "id": "SP6",
+          "name": "工单系统 v1",
+          "summary": "验收：错误提示明确",
+          "body": "# 工单系统 v1\n\n## 模块\n\n### 登录\n验收：错误提示明确\n### 工单流转\n- [ ] 状态变更写审计日志\n验收：越权指派被拒绝\n\n## 全局约束\n- 不新增第三方依赖\n- 密码只存 hash",
           "modules": [
             {
               "id": "M1",
-              "name": "登录：账号密码 + 短信验证码",
-              "goal": "账号密码登录，连续错误 5 次锁定。 验收：错误提示明确 验收：锁定 5 次后可自助解锁",
+              "name": "登录",
+              "goal": "验收：错误提示明确",
               "priority": "P1",
               "acceptance": [
-                "错误提示明确",
-                "锁定 5 次后可自助解锁"
+                "错误提示明确"
               ],
               "deps": []
             },
             {
               "id": "M2",
               "name": "工单流转",
-              "goal": "创建、指派、关闭工单，全程留痕。 验收：越权指派被拒绝",
+              "goal": "验收：越权指派被拒绝",
               "priority": "P1",
               "acceptance": [
-                "状态变更写入审计日志",
+                "状态变更写审计日志",
                 "越权指派被拒绝"
               ],
               "deps": []
             }
           ],
           "constraints": [
-            "不新增第三方依赖",
-            "密码只存 hash"
+            "- 不新增第三方依赖",
+            "- 密码只存 hash"
           ],
-          "created_at": "2026-11-24T14:39:47",
-          "updated_at": "2026-11-24T14:39:47",
-          "revision": 2,
-          "content_hash": "0c6b18f12a9ee4c0d9aafe93b6c78aba76dc64ab9143f014b41a87bb12e8353e"
+          "created_at": "2026-11-27T13:46:49",
+          "updated_at": "2026-11-27T13:46:49",
+          "revision": 1,
+          "content_hash": "60b4959181fc420359fe2d421ae4ecc1d5a61a07adbb549750306189f1fc0a66"
         },
         "tasks": [
           {
             "id": "T1",
-            "title": "工程骨架与环境搭建",
+            "title": "改名验证 · 9705",
             "phase": "设计",
             "phase_id": "P1",
             "level": 2,
@@ -2268,29 +4277,29 @@
               "目录结构与模板、规格存放就位"
             ],
             "acceptance_sources": [
-              "SP5/derived/engineering-skeleton",
-              "SP5/derived/engineering-skeleton"
+              "SP6/derived/engineering-skeleton",
+              "SP6/derived/engineering-skeleton"
             ],
-            "spec_ref": "SP5",
-            "spec_revision": 2,
-            "spec_hash": "0c6b18f12a9ee4c0d9aafe93b6c78aba76dc64ab9143f014b41a87bb12e8353e",
+            "spec_ref": "SP6",
+            "spec_revision": 1,
+            "spec_hash": "60b4959181fc420359fe2d421ae4ecc1d5a61a07adbb549750306189f1fc0a66",
             "kind": "foundation",
             "out_schema": "code-result-v1",
             "part": "skeleton",
             "source": {
-              "spec_id": "SP5",
-              "revision": 2,
+              "spec_id": "SP6",
+              "revision": 1,
               "module_id": "",
               "module_name": ""
             }
           },
           {
             "id": "T2",
-            "title": "「登录：账号密码 + 短信验证码」功能实现",
+            "title": "「登录」功能实现",
             "phase": "编码",
             "phase_id": "P2",
             "level": 2,
-            "what": "交付「登录：账号密码 + 短信验证码」的可运行实现：账号密码登录，连续错误 5 次锁定。 验收：错误提示明确 验收：锁定 5 次后可自助解锁；满足 2 条验收（错误提示明确；锁定 5 次后可自助解锁）",
+            "what": "交付「登录」的可运行实现：验收：错误提示明确；满足 1 条验收（错误提示明确）",
             "how": "Python 标准库实现：models.py 放数据模型与校验，service.py 放业务逻辑与接口路由，不引第三方依赖；完成后按验收条款逐条自测（取第一条条款写一条用例）",
             "files": [
               "src/m1/service.py",
@@ -2315,7 +4324,7 @@
                 "how": "逐条对照：错误提示明确"
               }
             ],
-            "module": "登录：账号密码 + 短信验证码",
+            "module": "登录",
             "module_id": "M1",
             "role": "后端",
             "priority": "P1",
@@ -2324,33 +4333,31 @@
               "T1"
             ],
             "acceptance": [
-              "错误提示明确",
-              "锁定 5 次后可自助解锁"
+              "错误提示明确"
             ],
             "acceptance_sources": [
-              "SP5/M1/acceptance/1",
-              "SP5/M1/acceptance/2"
+              "SP6/M1/acceptance/1"
             ],
-            "spec_ref": "SP5/M1",
-            "spec_revision": 2,
-            "spec_hash": "0c6b18f12a9ee4c0d9aafe93b6c78aba76dc64ab9143f014b41a87bb12e8353e",
+            "spec_ref": "SP6/M1",
+            "spec_revision": 1,
+            "spec_hash": "60b4959181fc420359fe2d421ae4ecc1d5a61a07adbb549750306189f1fc0a66",
             "kind": "implementation",
             "out_schema": "code-result-v1",
             "part": "feature",
             "source": {
-              "spec_id": "SP5",
-              "revision": 2,
+              "spec_id": "SP6",
+              "revision": 1,
               "module_id": "M1",
-              "module_name": "登录：账号密码 + 短信验证码"
+              "module_name": "登录"
             }
           },
           {
             "id": "T3",
-            "title": "「登录：账号密码 + 短信验证码」单元测试与回归",
+            "title": "「登录」单元测试与回归",
             "phase": "测试",
             "phase_id": "P3",
             "level": 2,
-            "what": "为「登录：账号密码 + 短信验证码」补用例并跑通：正常 / 边界 / 异常",
+            "what": "为「登录」补用例并跑通：正常 / 边界 / 异常",
             "how": "pytest：tests/test_m1.py，命令 python -m pytest -q",
             "files": [
               "tests/test_m1.py"
@@ -2369,7 +4376,7 @@
                 "how": "python -m pytest -q，把通过/失败数写进产物"
               }
             ],
-            "module": "登录：账号密码 + 短信验证码",
+            "module": "登录",
             "module_id": "M1",
             "role": "测试",
             "priority": "P1",
@@ -2378,33 +4385,31 @@
               "T2"
             ],
             "acceptance": [
-              "错误提示明确",
-              "锁定 5 次后可自助解锁"
+              "错误提示明确"
             ],
             "acceptance_sources": [
-              "SP5/M1/acceptance/1",
-              "SP5/M1/acceptance/2"
+              "SP6/M1/acceptance/1"
             ],
-            "spec_ref": "SP5/M1",
-            "spec_revision": 2,
-            "spec_hash": "0c6b18f12a9ee4c0d9aafe93b6c78aba76dc64ab9143f014b41a87bb12e8353e",
+            "spec_ref": "SP6/M1",
+            "spec_revision": 1,
+            "spec_hash": "60b4959181fc420359fe2d421ae4ecc1d5a61a07adbb549750306189f1fc0a66",
             "kind": "verification",
             "out_schema": "test-v1",
             "part": "test",
             "source": {
-              "spec_id": "SP5",
-              "revision": 2,
+              "spec_id": "SP6",
+              "revision": 1,
               "module_id": "M1",
-              "module_name": "登录：账号密码 + 短信验证码"
+              "module_name": "登录"
             }
           },
           {
             "id": "T4",
-            "title": "「登录：账号密码 + 短信验证码」代码评审",
+            "title": "「登录」代码评审",
             "phase": "评审",
             "phase_id": "P4",
             "level": 2,
-            "what": "对照验收条款评审「登录：账号密码 + 短信验证码」的实现，给出问题清单与结论",
+            "what": "对照验收条款评审「登录」的实现，给出问题清单与结论",
             "how": "读实现与测试，检查重复逻辑/异常处理/硬编码/越界；阻塞问题必须列出",
             "files": [],
             "steps": [
@@ -2421,7 +4426,7 @@
                 "how": "阻塞问题必须列出，最后给 pass/fail"
               }
             ],
-            "module": "登录：账号密码 + 短信验证码",
+            "module": "登录",
             "module_id": "M1",
             "role": "评审",
             "priority": "P1",
@@ -2430,24 +4435,22 @@
               "T3"
             ],
             "acceptance": [
-              "错误提示明确",
-              "锁定 5 次后可自助解锁"
+              "错误提示明确"
             ],
             "acceptance_sources": [
-              "SP5/M1/acceptance/1",
-              "SP5/M1/acceptance/2"
+              "SP6/M1/acceptance/1"
             ],
-            "spec_ref": "SP5/M1",
-            "spec_revision": 2,
-            "spec_hash": "0c6b18f12a9ee4c0d9aafe93b6c78aba76dc64ab9143f014b41a87bb12e8353e",
+            "spec_ref": "SP6/M1",
+            "spec_revision": 1,
+            "spec_hash": "60b4959181fc420359fe2d421ae4ecc1d5a61a07adbb549750306189f1fc0a66",
             "kind": "review",
             "out_schema": "verify-v1",
             "part": "review",
             "source": {
-              "spec_id": "SP5",
-              "revision": 2,
+              "spec_id": "SP6",
+              "revision": 1,
               "module_id": "M1",
-              "module_name": "登录：账号密码 + 短信验证码"
+              "module_name": "登录"
             }
           },
           {
@@ -2456,7 +4459,7 @@
             "phase": "编码",
             "phase_id": "P2",
             "level": 2,
-            "what": "交付「工单流转」的可运行实现：创建、指派、关闭工单，全程留痕。 验收：越权指派被拒绝；满足 2 条验收（状态变更写入审计日志；越权指派被拒绝）",
+            "what": "交付「工单流转」的可运行实现：验收：越权指派被拒绝；满足 2 条验收（状态变更写审计日志；越权指派被拒绝）",
             "how": "Python 标准库实现：models.py 放数据模型与校验，service.py 放业务逻辑与接口路由，不引第三方依赖；完成后按验收条款逐条自测（取第一条条款写一条用例）",
             "files": [
               "src/m2/service.py",
@@ -2478,7 +4481,7 @@
               },
               {
                 "title": "按验收条款自测",
-                "how": "逐条对照：状态变更写入审计日志"
+                "how": "逐条对照：状态变更写审计日志"
               }
             ],
             "module": "工单流转",
@@ -2490,22 +4493,22 @@
               "T1"
             ],
             "acceptance": [
-              "状态变更写入审计日志",
+              "状态变更写审计日志",
               "越权指派被拒绝"
             ],
             "acceptance_sources": [
-              "SP5/M2/acceptance/1",
-              "SP5/M2/acceptance/2"
+              "SP6/M2/acceptance/1",
+              "SP6/M2/acceptance/2"
             ],
-            "spec_ref": "SP5/M2",
-            "spec_revision": 2,
-            "spec_hash": "0c6b18f12a9ee4c0d9aafe93b6c78aba76dc64ab9143f014b41a87bb12e8353e",
+            "spec_ref": "SP6/M2",
+            "spec_revision": 1,
+            "spec_hash": "60b4959181fc420359fe2d421ae4ecc1d5a61a07adbb549750306189f1fc0a66",
             "kind": "implementation",
             "out_schema": "code-result-v1",
             "part": "feature",
             "source": {
-              "spec_id": "SP5",
-              "revision": 2,
+              "spec_id": "SP6",
+              "revision": 1,
               "module_id": "M2",
               "module_name": "工单流转"
             }
@@ -2544,22 +4547,22 @@
               "T5"
             ],
             "acceptance": [
-              "状态变更写入审计日志",
+              "状态变更写审计日志",
               "越权指派被拒绝"
             ],
             "acceptance_sources": [
-              "SP5/M2/acceptance/1",
-              "SP5/M2/acceptance/2"
+              "SP6/M2/acceptance/1",
+              "SP6/M2/acceptance/2"
             ],
-            "spec_ref": "SP5/M2",
-            "spec_revision": 2,
-            "spec_hash": "0c6b18f12a9ee4c0d9aafe93b6c78aba76dc64ab9143f014b41a87bb12e8353e",
+            "spec_ref": "SP6/M2",
+            "spec_revision": 1,
+            "spec_hash": "60b4959181fc420359fe2d421ae4ecc1d5a61a07adbb549750306189f1fc0a66",
             "kind": "verification",
             "out_schema": "test-v1",
             "part": "test",
             "source": {
-              "spec_id": "SP5",
-              "revision": 2,
+              "spec_id": "SP6",
+              "revision": 1,
               "module_id": "M2",
               "module_name": "工单流转"
             }
@@ -2596,22 +4599,22 @@
               "T6"
             ],
             "acceptance": [
-              "状态变更写入审计日志",
+              "状态变更写审计日志",
               "越权指派被拒绝"
             ],
             "acceptance_sources": [
-              "SP5/M2/acceptance/1",
-              "SP5/M2/acceptance/2"
+              "SP6/M2/acceptance/1",
+              "SP6/M2/acceptance/2"
             ],
-            "spec_ref": "SP5/M2",
-            "spec_revision": 2,
-            "spec_hash": "0c6b18f12a9ee4c0d9aafe93b6c78aba76dc64ab9143f014b41a87bb12e8353e",
+            "spec_ref": "SP6/M2",
+            "spec_revision": 1,
+            "spec_hash": "60b4959181fc420359fe2d421ae4ecc1d5a61a07adbb549750306189f1fc0a66",
             "kind": "review",
             "out_schema": "verify-v1",
             "part": "review",
             "source": {
-              "spec_id": "SP5",
-              "revision": 2,
+              "spec_id": "SP6",
+              "revision": 1,
               "module_id": "M2",
               "module_name": "工单流转"
             }
@@ -2653,24 +4656,24 @@
             "acceptance": [
               "端到端跑通主流程",
               "回归既有功能无退化",
-              "不新增第三方依赖",
-              "密码只存 hash"
+              "- 不新增第三方依赖",
+              "- 密码只存 hash"
             ],
             "acceptance_sources": [
-              "SP5/derived/integration-e2e",
-              "SP5/derived/integration-regression",
-              "SP5/constraints/1",
-              "SP5/constraints/2"
+              "SP6/derived/integration-e2e",
+              "SP6/derived/integration-regression",
+              "SP6/constraints/1",
+              "SP6/constraints/2"
             ],
-            "spec_ref": "SP5",
-            "spec_revision": 2,
-            "spec_hash": "0c6b18f12a9ee4c0d9aafe93b6c78aba76dc64ab9143f014b41a87bb12e8353e",
+            "spec_ref": "SP6",
+            "spec_revision": 1,
+            "spec_hash": "60b4959181fc420359fe2d421ae4ecc1d5a61a07adbb549750306189f1fc0a66",
             "kind": "integration",
             "out_schema": "test-v1",
             "part": "integrate",
             "source": {
-              "spec_id": "SP5",
-              "revision": 2,
+              "spec_id": "SP6",
+              "revision": 1,
               "module_id": "",
               "module_name": ""
             }
@@ -2712,17 +4715,17 @@
               "启动方式、配置文件、遗留风险写清楚"
             ],
             "acceptance_sources": [
-              "SP5/derived/delivery"
+              "SP6/derived/delivery"
             ],
-            "spec_ref": "SP5",
-            "spec_revision": 2,
-            "spec_hash": "0c6b18f12a9ee4c0d9aafe93b6c78aba76dc64ab9143f014b41a87bb12e8353e",
+            "spec_ref": "SP6",
+            "spec_revision": 1,
+            "spec_hash": "60b4959181fc420359fe2d421ae4ecc1d5a61a07adbb549750306189f1fc0a66",
             "kind": "delivery",
             "out_schema": "verify-v1",
             "part": "delivery",
             "source": {
-              "spec_id": "SP5",
-              "revision": 2,
+              "spec_id": "SP6",
+              "revision": 1,
               "module_id": "",
               "module_name": ""
             }
@@ -2738,7 +4741,7 @@
             "name": "需求输入",
             "deps": [],
             "max_retries": 0,
-            "description": "面向运维值班同学的工单系统，先做登录与工单流转。",
+            "description": "验收：错误提示明确",
             "part": "skeleton",
             "part_label": "工程骨架"
           },
@@ -2772,7 +4775,7 @@
             "id": "N4",
             "type": "agent",
             "role": "coder",
-            "name": "T1 工程骨架与环境搭建",
+            "name": "改名验证 · 9705",
             "deps": [
               "N3"
             ],
@@ -2780,7 +4783,7 @@
             "out_schema": "code-result-v1",
             "task_id": "T1",
             "module": "",
-            "spec_ref": "SP5",
+            "spec_ref": "SP6",
             "priority": "P0",
             "estimate": 1,
             "acceptance": [
@@ -2788,105 +4791,99 @@
               "目录结构与模板、规格存放就位"
             ],
             "acceptance_sources": [
-              "SP5/derived/engineering-skeleton",
-              "SP5/derived/engineering-skeleton"
+              "SP6/derived/engineering-skeleton",
+              "SP6/derived/engineering-skeleton"
             ],
             "kind": "foundation",
             "part": "skeleton",
             "part_label": "工程骨架",
             "ai": "",
-            "spec_revision": 2,
-            "spec_hash": "0c6b18f12a9ee4c0d9aafe93b6c78aba76dc64ab9143f014b41a87bb12e8353e"
+            "spec_revision": 1,
+            "spec_hash": "60b4959181fc420359fe2d421ae4ecc1d5a61a07adbb549750306189f1fc0a66"
           },
           {
             "id": "N5",
             "type": "agent",
             "role": "coder",
-            "name": "T2 「登录：账号密码 + 短信验证码」功能实现",
+            "name": "T2 「登录」功能实现",
             "deps": [
               "N4"
             ],
             "max_retries": 3,
             "out_schema": "code-result-v1",
             "task_id": "T2",
-            "module": "登录：账号密码 + 短信验证码",
-            "spec_ref": "SP5/M1",
+            "module": "登录",
+            "spec_ref": "SP6/M1",
             "priority": "P1",
             "estimate": 3,
             "acceptance": [
-              "错误提示明确",
-              "锁定 5 次后可自助解锁"
+              "错误提示明确"
             ],
             "acceptance_sources": [
-              "SP5/M1/acceptance/1",
-              "SP5/M1/acceptance/2"
+              "SP6/M1/acceptance/1"
             ],
             "kind": "implementation",
             "part": "feature",
             "part_label": "功能实现",
             "ai": "",
-            "spec_revision": 2,
-            "spec_hash": "0c6b18f12a9ee4c0d9aafe93b6c78aba76dc64ab9143f014b41a87bb12e8353e"
+            "spec_revision": 1,
+            "spec_hash": "60b4959181fc420359fe2d421ae4ecc1d5a61a07adbb549750306189f1fc0a66"
           },
           {
             "id": "N6",
             "type": "agent",
             "role": "tester",
-            "name": "T3 「登录：账号密码 + 短信验证码」单元测试与回归",
+            "name": "T3 「登录」单元测试与回归",
             "deps": [
               "N5"
             ],
             "max_retries": 3,
             "out_schema": "test-v1",
             "task_id": "T3",
-            "module": "登录：账号密码 + 短信验证码",
-            "spec_ref": "SP5/M1",
+            "module": "登录",
+            "spec_ref": "SP6/M1",
             "priority": "P1",
             "estimate": 1,
             "acceptance": [
-              "错误提示明确",
-              "锁定 5 次后可自助解锁"
+              "错误提示明确"
             ],
             "acceptance_sources": [
-              "SP5/M1/acceptance/1",
-              "SP5/M1/acceptance/2"
+              "SP6/M1/acceptance/1"
             ],
             "kind": "verification",
             "part": "test",
             "part_label": "测试验证",
             "ai": "",
-            "spec_revision": 2,
-            "spec_hash": "0c6b18f12a9ee4c0d9aafe93b6c78aba76dc64ab9143f014b41a87bb12e8353e"
+            "spec_revision": 1,
+            "spec_hash": "60b4959181fc420359fe2d421ae4ecc1d5a61a07adbb549750306189f1fc0a66"
           },
           {
             "id": "N7",
             "type": "agent",
             "role": "reviewer",
-            "name": "T4 「登录：账号密码 + 短信验证码」代码评审",
+            "name": "T4 「登录」代码评审",
             "deps": [
               "N6"
             ],
             "max_retries": 3,
             "out_schema": "verify-v1",
             "task_id": "T4",
-            "module": "登录：账号密码 + 短信验证码",
-            "spec_ref": "SP5/M1",
+            "module": "登录",
+            "spec_ref": "SP6/M1",
             "priority": "P1",
             "estimate": 1,
             "acceptance": [
-              "错误提示明确",
-              "锁定 5 次后可自助解锁"
+              "错误提示明确"
             ],
             "acceptance_sources": [
-              "SP5/M1/acceptance/1",
-              "SP5/M1/acceptance/2"
+              "SP6/M1/acceptance/1"
             ],
             "kind": "review",
             "part": "review",
             "part_label": "代码评审",
             "ai": "",
-            "spec_revision": 2,
-            "spec_hash": "0c6b18f12a9ee4c0d9aafe93b6c78aba76dc64ab9143f014b41a87bb12e8353e"
+            "spec_revision": 1,
+            "spec_hash": "60b4959181fc420359fe2d421ae4ecc1d5a61a07adbb549750306189f1fc0a66"
           },
           {
             "id": "N8",
@@ -2900,23 +4897,23 @@
             "out_schema": "code-result-v1",
             "task_id": "T5",
             "module": "工单流转",
-            "spec_ref": "SP5/M2",
+            "spec_ref": "SP6/M2",
             "priority": "P1",
             "estimate": 3,
             "acceptance": [
-              "状态变更写入审计日志",
+              "状态变更写审计日志",
               "越权指派被拒绝"
             ],
             "acceptance_sources": [
-              "SP5/M2/acceptance/1",
-              "SP5/M2/acceptance/2"
+              "SP6/M2/acceptance/1",
+              "SP6/M2/acceptance/2"
             ],
             "kind": "implementation",
             "part": "feature",
             "part_label": "功能实现",
             "ai": "",
-            "spec_revision": 2,
-            "spec_hash": "0c6b18f12a9ee4c0d9aafe93b6c78aba76dc64ab9143f014b41a87bb12e8353e"
+            "spec_revision": 1,
+            "spec_hash": "60b4959181fc420359fe2d421ae4ecc1d5a61a07adbb549750306189f1fc0a66"
           },
           {
             "id": "N9",
@@ -2930,23 +4927,23 @@
             "out_schema": "test-v1",
             "task_id": "T6",
             "module": "工单流转",
-            "spec_ref": "SP5/M2",
+            "spec_ref": "SP6/M2",
             "priority": "P1",
             "estimate": 1,
             "acceptance": [
-              "状态变更写入审计日志",
+              "状态变更写审计日志",
               "越权指派被拒绝"
             ],
             "acceptance_sources": [
-              "SP5/M2/acceptance/1",
-              "SP5/M2/acceptance/2"
+              "SP6/M2/acceptance/1",
+              "SP6/M2/acceptance/2"
             ],
             "kind": "verification",
             "part": "test",
             "part_label": "测试验证",
             "ai": "",
-            "spec_revision": 2,
-            "spec_hash": "0c6b18f12a9ee4c0d9aafe93b6c78aba76dc64ab9143f014b41a87bb12e8353e"
+            "spec_revision": 1,
+            "spec_hash": "60b4959181fc420359fe2d421ae4ecc1d5a61a07adbb549750306189f1fc0a66"
           },
           {
             "id": "N10",
@@ -2960,23 +4957,23 @@
             "out_schema": "verify-v1",
             "task_id": "T7",
             "module": "工单流转",
-            "spec_ref": "SP5/M2",
+            "spec_ref": "SP6/M2",
             "priority": "P1",
             "estimate": 1,
             "acceptance": [
-              "状态变更写入审计日志",
+              "状态变更写审计日志",
               "越权指派被拒绝"
             ],
             "acceptance_sources": [
-              "SP5/M2/acceptance/1",
-              "SP5/M2/acceptance/2"
+              "SP6/M2/acceptance/1",
+              "SP6/M2/acceptance/2"
             ],
             "kind": "review",
             "part": "review",
             "part_label": "代码评审",
             "ai": "",
-            "spec_revision": 2,
-            "spec_hash": "0c6b18f12a9ee4c0d9aafe93b6c78aba76dc64ab9143f014b41a87bb12e8353e"
+            "spec_revision": 1,
+            "spec_hash": "60b4959181fc420359fe2d421ae4ecc1d5a61a07adbb549750306189f1fc0a66"
           },
           {
             "id": "N11",
@@ -2991,27 +4988,27 @@
             "out_schema": "test-v1",
             "task_id": "T8",
             "module": "",
-            "spec_ref": "SP5",
+            "spec_ref": "SP6",
             "priority": "P0",
             "estimate": 2,
             "acceptance": [
               "端到端跑通主流程",
               "回归既有功能无退化",
-              "不新增第三方依赖",
-              "密码只存 hash"
+              "- 不新增第三方依赖",
+              "- 密码只存 hash"
             ],
             "acceptance_sources": [
-              "SP5/derived/integration-e2e",
-              "SP5/derived/integration-regression",
-              "SP5/constraints/1",
-              "SP5/constraints/2"
+              "SP6/derived/integration-e2e",
+              "SP6/derived/integration-regression",
+              "SP6/constraints/1",
+              "SP6/constraints/2"
             ],
             "kind": "integration",
             "part": "integrate",
             "part_label": "集成验收",
             "ai": "",
-            "spec_revision": 2,
-            "spec_hash": "0c6b18f12a9ee4c0d9aafe93b6c78aba76dc64ab9143f014b41a87bb12e8353e"
+            "spec_revision": 1,
+            "spec_hash": "60b4959181fc420359fe2d421ae4ecc1d5a61a07adbb549750306189f1fc0a66"
           },
           {
             "id": "N12",
@@ -3025,21 +5022,21 @@
             "out_schema": "verify-v1",
             "task_id": "T9",
             "module": "",
-            "spec_ref": "SP5",
+            "spec_ref": "SP6",
             "priority": "P1",
             "estimate": 1,
             "acceptance": [
               "启动方式、配置文件、遗留风险写清楚"
             ],
             "acceptance_sources": [
-              "SP5/derived/delivery"
+              "SP6/derived/delivery"
             ],
             "kind": "delivery",
             "part": "delivery",
             "part_label": "交付",
             "ai": "",
-            "spec_revision": 2,
-            "spec_hash": "0c6b18f12a9ee4c0d9aafe93b6c78aba76dc64ab9143f014b41a87bb12e8353e"
+            "spec_revision": 1,
+            "spec_hash": "60b4959181fc420359fe2d421ae4ecc1d5a61a07adbb549750306189f1fc0a66"
           },
           {
             "id": "N13",
@@ -3201,9 +5198,9 @@
           }
         ]
       },
-      "base_version": "v2",
-      "dirty": false,
-      "updated_at": "2026-11-26T11:15:03"
+      "base_version": "v3",
+      "dirty": true,
+      "updated_at": "2026-11-27T13:46:49"
     }
   }
 }

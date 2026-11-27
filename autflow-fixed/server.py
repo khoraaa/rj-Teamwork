@@ -40,6 +40,8 @@ SPEC_PATH = os.path.join(DATA_DIR, "specs.json")
 SETTINGS_PATH = os.path.join(DATA_DIR, "settings.json")
 # 每次运行一个隔离工作区：模型在这里真的写代码、真的跑测试
 WORKSPACES_DIR = os.path.join(DATA_DIR, "workspaces")
+# 默认只跑模拟工作流。真实代码写盘/命令执行必须通过环境变量显式启用。
+LOCAL_CODE_EXECUTION_ENABLED = os.environ.get("AUTFLOW_ENABLE_LOCAL_CODE_EXECUTION") == "1"
 
 sys.path.insert(0, BASE_DIR)
 import llm_client                                    # noqa: E402  模型接入与密钥管理
@@ -1321,6 +1323,51 @@ def _endpoint_label(method, path):
     return "%s %s" % (method, path)
 
 
+def _step_target_file(task, step, step_index):
+    files = [str(p).replace("\\", "/").strip() for p in (task.get("files") or []) if p]
+    explicit = []
+    for key in ("file", "path"):
+        if step.get(key):
+            explicit.append(str(step[key]).replace("\\", "/").strip())
+    explicit.extend(str(p).replace("\\", "/").strip() for p in (step.get("files") or []) if p)
+    description = " ".join(str(step.get(k) or "") for k in ("title", "how"))
+    explicit.extend(re.findall(r"(?:[\w.-]+/)*[\w.-]+\.(?:py|js|ts|tsx|jsx|html|css|json|md|sql)", description))
+    for path in explicit:
+        if path in files:
+            return path
+    if files:
+        return files[min(step_index, len(files) - 1)]
+    return ""
+
+
+def _generate_step_code(task, step, path, ai_id=None):
+    """生成仅用于界面预览的源代码；不创建文件，也不执行生成内容。"""
+    config = SETTINGS.spec(ai_id) if ai_id else SETTINGS.data
+    if not (config.get("base_url") and config.get("api_key")):
+        raise llm_client.LLMNotConfigured("代码预览需要先配置可用的模型端点与 API Key")
+    messages = [
+        {"role": "system", "content":
+         "你是代码预览生成器。根据给定任务与子步骤，生成目标文件的完整源代码。"
+         "只返回代码，不要 Markdown 代码围栏、解释、TODO 或省略号。"
+         "不要调用工具，不要创建文件，不要执行任何命令。"},
+        {"role": "user", "content":
+         "目标文件：%s\n任务：%s\n阶段：%s\n做什么：%s\n怎么做：%s\n"
+         "验收标准：\n%s\n\n子步骤：%s\n子步骤说明：%s\n\n"
+         "请输出这个子步骤对应的完整、可读、尽量可运行的文件内容。"
+         % (path, task.get("title") or "", task.get("phase") or "",
+            task.get("what") or "", task.get("how") or "",
+            "\n".join("- " + str(x) for x in (task.get("acceptance") or [])[:8]) or "无",
+            step.get("title") or "", step.get("how") or "")},
+    ]
+    reply = LLM.chat(messages, timeout=90, temperature=0.2, max_tokens=3000, ai_id=ai_id)
+    code = (reply.get("content") or "").strip()
+    code = re.sub(r"^```[^\r\n]*\r?\n", "", code)
+    code = re.sub(r"\r?\n```$", "", code).strip()
+    if not code:
+        raise llm_client.LLMError("E-FORMAT", "模型没有返回代码内容")
+    return code
+
+
 def decompose_spec(spec):
     """设计规格 → (tasks, trace, stats)：三级结构（阶段 → 任务 → 子步骤）。
 
@@ -1738,11 +1785,8 @@ def _mock_output(n, context=None):
         return {"artifact": "design-v1", "endpoints": ["POST /api/login", "POST /api/logout"],
                 "entities": ["user", "session"], "tables": 2, "planned_cases": 6}
     if schema == "code-result-v1":
-        if "重构" in name or "修复" in name:
-            return {"artifact": "code-result-v1", "refactor": True, "loc": 154,
-                    "coverage": 0.84, "sha256": "3ad1…88fe"}
-        return {"artifact": "code-result-v1", "files": ["src/login.py", "tests/test_login.py"],
-                "loc": 168, "tests": 7, "sha256": "9f2c…a71b"}
+        return {"artifact": "code-result-v1", "loc": 0,
+                "summary": "模拟运行：未生成文件，也未在本机执行代码"}
     if schema == "scan-v1":
         return {"artifact": "scan-v1", "critical": 0, "high": 1, "score": 92,
                 "findings": ["口令未加盐（中危）"]}
@@ -1922,7 +1966,8 @@ class Engine:
         self._exec_seq = 0
         # 运行配置在重启后保留（start/reset 不应丢配置）
         self.cfg = {"speed": 1.0, "demo": True, "qa_mode": "auto",
-                    "agent": "llm" if SETTINGS.public()["active"] else "mock"}
+                    "agent": ("llm" if SETTINGS.public()["active"] else "mock")
+                    if LOCAL_CODE_EXECUTION_ENABLED else "mock"}
         self.state_store = RunStateStore(RUN_STATE_PATH)
         # 当前运行所绑定的定义（运行时冻结，避免运行中编辑影响执行）
         self.wf = _clone(WORKFLOW)
@@ -2078,8 +2123,9 @@ class Engine:
             "fail_mode": "off",          # off | single | persistent | timeout | timeout_persistent
             "concurrency": int(wf.get("concurrency_limit", 3) or 3),
             "stats": {"dispatched": 0, "retries": 0, "skipped": 0, "human_waits": 0},
-            "agent": self.cfg.get("agent", "mock"),
-            "mode": "llm" if SETTINGS.public()["active"] else "mock",
+            "agent": self.cfg.get("agent", "mock") if LOCAL_CODE_EXECUTION_ENABLED else "mock",
+            "mode": ("llm" if SETTINGS.public()["active"] else "mock")
+            if LOCAL_CODE_EXECUTION_ENABLED else "mock",
             "workspace": "",
             "artifacts": [],
             "recovered": False,
@@ -2135,8 +2181,12 @@ class Engine:
                 annotate_parts(self.wf.get("nodes") or [])
             self._new_run()
             self.run["status"] = "RUNNING"
-            self.run["mode"] = "llm" if SETTINGS.public()["active"] else "mock"
-            self._prepare_workspace()
+            self.run["mode"] = ("llm" if SETTINGS.public()["active"] else "mock")
+            if not LOCAL_CODE_EXECUTION_ENABLED:
+                self.run["mode"] = "mock"
+                self.run["agent"] = "mock"
+            if LOCAL_CODE_EXECUTION_ENABLED and self.run["mode"] == "llm":
+                self._prepare_workspace()
             self.run["started_at"] = time.time()
             self._emit("run.started", None, "运行已启动 · 工作流版本 " + str(self.wf.get("version")))
             if self.run["mode"] == "llm":
@@ -2495,6 +2545,8 @@ class Engine:
         * 显式指定 agent=llm → 走真实模型（编码/设计/测试/评审用带工具的 ToolAgent）；
         * 用户保存配置并启用真实模型时，配置写入时会把 agent 切成 llm。
         """
+        if not LOCAL_CODE_EXECUTION_ENABLED:
+            return "mock"
         forced = self.cfg.get("agent") or "mock"
         if forced == "mock":
             # 例外：这个节点/分组指定了 AI，就按真实模型跑（用户显式指派，不能悄悄忽略）
@@ -3045,9 +3097,11 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/stream":
             return self._stream()
         if path == "/api/agents":
-            return self._json({"current": ENGINE.cfg.get("agent", "mock"),
+            current = ENGINE.cfg.get("agent", "mock") if LOCAL_CODE_EXECUTION_ENABLED else "mock"
+            return self._json({"current": current,
                                "available": sorted(AGENTS.keys()),
                                "mode": ENGINE.run.get("mode"),
+                               "local_code_execution": LOCAL_CODE_EXECUTION_ENABLED,
                                "settings": SETTINGS.public()})
         if path == "/api/settings":
             return self._json({"settings": SETTINGS.public()})
@@ -3354,6 +3408,43 @@ class Handler(BaseHTTPRequestHandler):
             SETTINGS.clear_key(body.get("ai_id"))
             return self._json({"ok": True, "cleared": True,
                                "settings": SETTINGS.public()})
+        if path == "/api/tasks/preview-code":
+            task_id = str(body.get("task_id") or "")
+            try:
+                step_index = int(body.get("step_index"))
+            except (TypeError, ValueError):
+                return self._json({"ok": False, "message": "子步骤编号无效"}, 400)
+            if not task_id or step_index < 0:
+                return self._json({"ok": False, "message": "任务或子步骤编号无效"}, 400)
+            with ENGINE.lock:
+                definition = (ENGINE.run.get("definition")
+                              if ENGINE.run.get("status") != "IDLE" else ENGINE.wf)
+                definition = _clone(definition or ENGINE.wf)
+            task = next((t for t in (definition.get("tasks") or [])
+                         if str(t.get("id")) == task_id), None)
+            if not task:
+                return self._json({"ok": False, "message": "当前工作流中找不到该任务"}, 404)
+            steps = task.get("steps") or []
+            if step_index >= len(steps):
+                return self._json({"ok": False, "message": "找不到该子步骤"}, 404)
+            step = steps[step_index]
+            if not isinstance(step, dict):
+                return self._json({"ok": False, "message": "子步骤格式无效"}, 400)
+            target = _step_target_file(task, step, step_index)
+            if not target:
+                return self._json({"ok": False, "message": "该子步骤没有关联的目标文件"}, 400)
+            node = next((n for n in (definition.get("nodes") or [])
+                         if n.get("task_id") == task_id), None)
+            ai_id = ENGINE._ai_for(node) if node else (task.get("ai") or "")
+            try:
+                code = _generate_step_code(task, step, target, ai_id or None)
+            except llm_client.LLMError as exc:
+                status = 400 if isinstance(exc, llm_client.LLMNotConfigured) else 502
+                return self._json({"ok": False, "code": getattr(exc, "code", "E-AGENT"),
+                                   "message": str(exc)}, status)
+            return self._json({"ok": True, "task_id": task_id, "step_index": step_index,
+                               "path": target, "code": code,
+                               "saved": False, "executed": False})
         if path == "/api/ais":
             res = SETTINGS.upsert_ai(body or {})
             return self._json({"ok": True, "ai": res, "settings": SETTINGS.public()})
@@ -3395,7 +3486,7 @@ class Handler(BaseHTTPRequestHandler):
                 patch.pop("api_key")
             SETTINGS.save(patch)
             active = SETTINGS.public()["active"]
-            ENGINE.configure(agent="llm" if active else "mock")
+            ENGINE.configure(agent="llm" if LOCAL_CODE_EXECUTION_ENABLED and active else "mock")
             return self._json({"ok": True, "settings": SETTINGS.public()})
         if path == "/api/settings/probe":
             try:

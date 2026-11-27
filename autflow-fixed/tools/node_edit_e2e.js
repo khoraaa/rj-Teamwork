@@ -247,6 +247,35 @@ async function main() {
     check((await text('#paneDetail')).indexOf('预计产物') >= 0, '未运行时给出预计产物协议');
     check((await evaluate("document.querySelectorAll('#paneDetail .out-kv > div').length")) >= 2,
       '未运行时列出落点文件 / 要满足的验收');
+    const previewButton = await evaluate(`(() => {
+      const btn = document.querySelector('#paneDetail .step-preview-btn:not(:disabled)');
+      if (!btn) return false;
+      window.__previewOriginalFetch = window.fetch;
+      window.fetch = async (input, init) => {
+        if (String(input).includes('/api/tasks/preview-code')) {
+          return new Response(JSON.stringify({
+            ok: true, path: 'src/preview.py', code: 'print("preview")',
+            saved: false, executed: false
+          }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        }
+        return window.__previewOriginalFetch(input, init);
+      };
+      btn.click();
+      return true;
+    })()`);
+    check(previewButton, '任务子步骤有可用的「查看代码」按钮');
+    await waitFor("document.querySelector('#stepCodeDialog').open"
+      + " && document.querySelector('#stepCodeBody').textContent === 'print(\"preview\")'",
+    10000, '代码预览弹窗显示返回内容');
+    check((await text('#stepCodePath')) === 'src/preview.py', '弹窗显示目标文件路径');
+    check((await text('#stepCodeStatus')).indexOf('未保存到本机') >= 0
+      && (await text('#stepCodeStatus')).indexOf('未执行') >= 0,
+    '弹窗明确标注未保存、未执行');
+    await evaluate(`(() => {
+      document.querySelector('#stepCodeDialog').close();
+      window.fetch = window.__previewOriginalFetch;
+      delete window.__previewOriginalFetch;
+    })()`);
     await shot('02-node-content');
 
     console.log('\n[4] 视图态直接改这一个节点');

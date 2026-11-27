@@ -192,6 +192,19 @@
 
 <div class="toast" id="toast"></div>
 
+<dialog class="code-preview-dialog" id="stepCodeDialog" aria-labelledby="stepCodeTitle">
+  <div class="code-preview-head">
+    <div>
+      <b id="stepCodeTitle">子步骤代码预览</b>
+      <div class="code-preview-path" id="stepCodePath"></div>
+    </div>
+    <button class="panel-x" type="button" onclick="document.getElementById('stepCodeDialog').close()"
+      aria-label="关闭代码预览">×</button>
+  </div>
+  <div class="code-preview-status" id="stepCodeStatus" role="status"></div>
+  <pre class="code-preview-body" id="stepCodeBody"></pre>
+</dialog>
+
 <!-- 故障提示条：断线 / 请求失败 -->
 <div class="netbanner" id="netBanner" hidden>
   <span class="net-ico">!</span>
@@ -325,15 +338,14 @@
   </div>
   <div class="panel-body">
     <div class="panel-hint">
-      配置后，编码 / 测试 / 评审节点会由模型在隔离工作区里<b>真的写代码、真的跑测试</b>；
-      不配置时走本地确定性模拟（界面会标「模拟」）。
+      工作流始终只运行模拟流程，不会在本机创建代码文件或执行命令。配置模型后，可在任务详情点击子步骤生成代码预览；预览内容不会保存或运行。
       密钥只存在本机 <code>data/settings.json</code>，接口只回掩码。
     </div>
 
     <div class="mode-switch">
       <label class="switch">
         <input type="checkbox" id="tglUseLLM" onchange="onModeToggle()">
-        <span>使用真实模型执行</span>
+        <span>启用模型代码预览</span>
       </label>
       <span class="mode-chip" id="modelState">未配置</span>
     </div>

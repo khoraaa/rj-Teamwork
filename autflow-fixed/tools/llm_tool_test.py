@@ -157,6 +157,7 @@ def start_server(llm_url):
     env["AUTFLOW_LLM_API_KEY"] = "sk-test-1234567890abcdef"
     env["AUTFLOW_LLM_MODEL"] = "fake-coder"
     env["AUTFLOW_LLM_MODE"] = "llm"
+    env["AUTFLOW_ENABLE_LOCAL_CODE_EXECUTION"] = "1"
     env["PYTHONIOENCODING"] = "utf-8"
     proc = subprocess.Popen([sys.executable, SERVER, "--host", "127.0.0.1", "--port", str(port)],
                             cwd=ROOT, env=env,

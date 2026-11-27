@@ -1358,8 +1358,10 @@ function taskBlock(n) {
     ${(t.files || []).length ? `<div class="section-title">落点文件</div>
       <div class="chips">${t.files.map(f => `<span class="chip file">${esc(f)}</span>`).join('')}</div>` : ''}
     ${(t.steps || []).length ? `<div class="section-title">子步骤（${t.steps.length}）</div>
-      <ol class="step-list">${t.steps.map(st => `<li><b>${esc(st.title || '')}</b>${
-        st.how ? '<span>' + esc(st.how) + '</span>' : ''}</li>`).join('')}</ol>` : ''}
+      <ol class="step-list">${t.steps.map((st, i) => `<li><div class="step-copy"><b>${esc(st.title || '')}</b>${
+        st.how ? '<span>' + esc(st.how) + '</span>' : ''}</div>
+        <button class="btn sm ghost step-preview-btn" onclick="previewStepCode('${esc(t.id)}', ${i})"
+          ${!(t.files || []).length ? 'disabled title="此任务未关联目标文件"' : 'title="生成代码预览，不保存到本机也不执行"'}>查看代码</button></li>`).join('')}</ol>` : ''}
     <div class="section-title">验收条款</div>
     <div class="task-acceptance">${taskAcceptanceHTML(t)}</div>` : '';
   if (!isPmNode(n) && !t) return info;
@@ -1387,6 +1389,32 @@ function gotoTask(tid) {
   const list = (app.def && app.def.nodes) || [];
   const hit = list.find(x => x.task_id === tid);
   if (hit) selectNode(hit.id);
+}
+
+async function previewStepCode(taskId, stepIndex) {
+  const dialog = $('#stepCodeDialog');
+  const path = $('#stepCodePath');
+  const status = $('#stepCodeStatus');
+  const code = $('#stepCodeBody');
+  path.textContent = '正在确定目标文件…';
+  status.textContent = '正在请求模型生成代码预览…';
+  code.textContent = '';
+  if (!dialog.open) dialog.showModal();
+  try {
+    const result = await api('/api/tasks/preview-code', {
+      task_id: taskId, step_index: stepIndex
+    });
+    if (!result.ok) {
+      path.textContent = result.path || '代码预览不可用';
+      status.textContent = result.message || '代码预览生成失败';
+      return;
+    }
+    path.textContent = result.path;
+    status.textContent = '仅供预览 · 未保存到本机 · 未执行';
+    code.textContent = result.code || '';
+  } catch (error) {
+    status.textContent = '请求失败：' + (error && error.message ? error.message : '网络错误');
+  }
 }
 
 function renderEdgeDetail(pane) {
@@ -2763,7 +2791,7 @@ async function exitHistory() {
 
 /* ================================================================ 模型接入
  * 密钥只在服务端保存（data/settings.json），前端只拿到掩码提示；
- * 保存后 /api/state 的 settings.active 决定引擎走真实模型还是本地模拟。
+ * 保存后 /api/state 的 settings.active 表示模型可用于讨论与代码预览；运行仍为模拟。
  */
 const PRESET_FALLBACK = [
   { id: 'openai', name: 'OpenAI', base_url: 'https://api.openai.com/v1', model: 'gpt-4o-mini' },
@@ -2824,7 +2852,7 @@ function fillSettings(s) {
   $('#setModel').value = s.model || '';
   $('#setKey').value = '';
   $('#setKeyHint').textContent = s.has_key
-    ? ('已保存 ' + (s.key_hint || '••••')) : '未保存（必填才能用真实模型）';
+    ? ('已保存 ' + (s.key_hint || '••••')) : '未保存（用于模型代码预览）';
   $('#setTemp').value = s.temperature != null ? s.temperature : 0.2;
   $('#setSteps').value = s.max_steps != null ? s.max_steps : 14;
   $('#setMaxTokens').value = s.max_tokens != null ? s.max_tokens : 4096;
@@ -2854,7 +2882,7 @@ function onModeToggle() {
   if ($('#tglUseLLM').checked && !(app.settings && app.settings.has_key)
       && !$('#setKey').value.trim()) {
     $('#setKey').focus();
-    toast('先填入 API Key（或选择本地 Ollama）再启用真实模型', true);
+    toast('先填入 API Key（或选择本地 Ollama）再启用代码预览', true);
   }
 }
 
@@ -3021,7 +3049,7 @@ async function saveSettings() {
   const key = $('#setKey').value.trim();
   if (key) payload.api_key = key;
   if (payload.mode === 'llm' && !key && !(app.settings && app.settings.has_key)) {
-    toast('启用真实模型需要 API Key', true);
+    toast('启用模型代码预览需要 API Key', true);
     $('#setKey').focus();
     return;
   }
@@ -3033,9 +3061,9 @@ async function saveSettings() {
     fillSettings(r.settings);
     renderModeChip();
     note.textContent = r.settings.active
-      ? '已启用 · 下一次运行会用真实模型（编码/测试/评审会真的写文件）'
-      : '已保存 · 当前仍是模拟模式';
-    toast(r.settings.active ? '已启用真实模型' : '配置已保存');
+      ? '模型已就绪 · 可用于讨论和子步骤代码预览；工作流仍只运行模拟流程'
+      : '已保存 · 模型尚不可用于预览；工作流仍为模拟模式';
+    toast(r.settings.active ? '模型已就绪，可生成代码预览' : '配置已保存');
   } catch (e) {
     note.textContent = '保存失败：' + (e && e.message ? e.message : e);
   } finally {
@@ -3078,13 +3106,13 @@ function renderModeChip() {
     && ['RUNNING', 'PAUSED', 'WAITING_HUMAN', 'RECONCILING'].indexOf(app.run.status) >= 0;
   // 标签里始终保留「模型」二字：它既是状态，也是模型配置入口
   if (live) { chip.textContent = '⚙ 模型 · 运行中'; chip.className = 'mode-chip btn sm on'; }
-  else if (s.active) { chip.textContent = '⚙ 模型 · 真实模型'; chip.className = 'mode-chip btn sm on'; }
+  else if (s.active) { chip.textContent = '⚙ 模型 · 已配置'; chip.className = 'mode-chip btn sm on'; }
   else if (s.has_key) { chip.textContent = '⚙ 模型 · 模拟（已配置未启用）'; chip.className = 'mode-chip btn sm'; }
   else { chip.textContent = '⚙ 模型 · 模拟'; chip.className = 'mode-chip btn sm'; }
   chip.title = s.active
-    ? ('真实模型：' + (s.provider || '') + ' / ' + (s.model || '')
-       + ' — 可做 AI 规划讨论与真实执行；点此修改配置')
-    : '当前为本地确定性模拟：可以跑完整流程，但没有模型参与；点此配置大模型';
+    ? ('模型已配置：' + (s.provider || '') + ' / ' + (s.model || '')
+       + ' — 可用于 AI 讨论与代码预览；工作流运行始终为模拟；点此修改配置')
+    : '工作流运行始终为模拟；配置模型后可使用 AI 讨论和子步骤代码预览';
   syncDiscussUI();
 }
 
