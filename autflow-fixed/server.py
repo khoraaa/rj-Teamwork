@@ -1213,8 +1213,152 @@ def _impl_what(module, acceptance):
     return text
 
 
+# 常见实体词表：中文名 → (单数, 复数)。命中时表名/符号名才像 users，
+# 而不是把模块 id 当表名；没命中就退化成模块 slug。
+ENTITY_GLOSS = {
+    "用户": ("user", "users"), "账号": ("account", "accounts"), "会员": ("member", "members"),
+    "订单": ("order", "orders"), "商品": ("product", "products"), "库存": ("stock", "stock"),
+    "支付": ("payment", "payments"), "退款": ("refund", "refunds"), "对账": ("reconcile", "reconciles"),
+    "账单": ("bill", "bills"), "审核": ("review", "reviews"), "审批": ("approval", "approvals"),
+    "消息": ("message", "messages"), "通知": ("notice", "notices"), "邮件": ("mail", "mails"),
+    "文件": ("file", "files"), "角色": ("role", "roles"), "权限": ("permission", "permissions"),
+    "日志": ("log", "logs"), "任务": ("task", "tasks"), "项目": ("project", "projects"),
+    "评论": ("comment", "comments"), "优惠券": ("coupon", "coupons"), "购物车": ("cart", "carts"),
+}
+ENTITY_SUFFIX = ("功能实现", "功能", "实现", "模块", "管理", "服务", "接口", "页面", "系统", "流程", "设计")
+
+
+def _entity_of(module):
+    """猜这个模块围绕哪个实体：优先常见词表，其次剥掉“功能/模块/实现”这类后缀。"""
+    name = (module.get("name") or "").strip()
+    text = name + " " + (module.get("goal") or "")
+    for cn, pair in ENTITY_GLOSS.items():
+        if cn in text:
+            return cn, pair[0], pair[1]
+    base = name
+    for suffix in ENTITY_SUFFIX:
+        if base.endswith(suffix) and len(base) > len(suffix):
+            base = base[:-len(suffix)]
+            break
+    base = base.strip() or (module.get("name") or "业务")
+    fallback = _module_slug(module).replace("-", "_")
+    return base, fallback, fallback
+
+
+def _step_files(steps):
+    """子步骤里显式写到的文件，按出现顺序去重。"""
+    seen, files = set(), []
+    for step in steps or []:
+        path = str(step.get("file") or "").strip()
+        if path and path not in seen:
+            seen.add(path)
+            files.append(path)
+    return files
+
+
+def _feature_steps(module, role, acceptance):
+    """实现类任务的子步骤：按“代码形态”拼，不按功能写死。
+
+    每一行都带 file / symbols / assertion / est_lines：
+    - symbols 是计划里该出现的符号，跑完后可用 symbols.py 去真实文件里核对；
+    - assertion 是“这一步怎么算做完”，短句、可判定；
+    - est_lines 只是参考值，真实行数以生成结果为准。
+    """
+    cn, single, plural = _entity_of(module)
+    slug = _module_slug(module)
+    text = " ".join([(module.get("name") or ""), (module.get("goal") or "")]
+                    + [str(a) for a in (acceptance or [])]).lower()
+    auth = any(w in text for w in ("登录", "注册", "密码", "鉴权", "认证", "token", "session", "权限"))
+    pay = any(w in text for w in ("支付", "扣款", "退款", "对账", "回调", "账单"))
+    review = any(w in text for w in ("审核", "审批", "驳回"))
+    listing = any(w in text for w in ("列表", "查询", "分页", "搜索", "筛选"))
+
+    sql = "migrations/001_%s.sql" % slug
+    model = "src/%s/models.py" % slug
+    sec = "src/%s/security.py" % slug
+    svc = "src/%s/service.py" % slug
+    api = "src/api/%s.py" % slug
+    test = "tests/test_%s.py" % slug
+    cls = "".join(part.capitalize() for part in single.split("_"))
+
+    steps = [
+        {"title": "建%s表" % cn,
+         "how": "写 %s：主键、唯一索引、时间戳字段" % sql,
+         "file": sql,
+         "symbols": ["CREATE TABLE %s" % plural],
+         "assertion": "表存在，唯一键生效",
+         "est_lines": 15},
+        {"title": "%s实体与字段校验" % cn,
+         "how": "写 %s：数据类 + 字段校验（非法输入抛 ValueError）" % model,
+         "file": model,
+         "symbols": ["class %s" % cls, "validate_%s()" % single],
+         "assertion": "非法输入被拒",
+         "est_lines": 25},
+    ]
+    if auth:
+        steps.append({"title": "密码哈希与校验",
+                      "how": "写 %s：hash_password / verify_password，不存明文" % sec,
+                      "file": sec,
+                      "symbols": ["hash_password()", "verify_password()"],
+                      "assertion": "明文不落库，正确密码可通过",
+                      "est_lines": 20})
+    if pay:
+        steps.append({"title": "支付状态机与回调",
+                      "how": "写 %s：待支付 → 已支付 → 已退款，回调幂等" % svc,
+                      "file": svc,
+                      "symbols": ["mark_paid()", "handle_callback()"],
+                      "assertion": "重复回调不重复入账",
+                      "est_lines": 35})
+    if review:
+        steps.append({"title": "审核状态机",
+                      "how": "写 %s：待审 → 通过 / 驳回，每次流转记审计" % svc,
+                      "file": svc,
+                      "symbols": ["approve()", "reject()"],
+                      "assertion": "非法流转被拒",
+                      "est_lines": 25})
+    if listing:
+        steps.append({"title": "%s列表与分页" % cn,
+                      "how": "写 %s：筛选、排序、分页边界" % api,
+                      "file": api,
+                      "symbols": ["GET /api/%s" % plural, "list_%s()" % plural],
+                      "assertion": "空结果与越界页不报错",
+                      "est_lines": 20})
+
+    service_title = ("注册服务" if "注册" in text else "登录服务" if "登录" in text
+                     else "%s服务" % cn)
+    steps.append({"title": service_title,
+                  "how": "写 %s：查重 → 校验 → 落库，失败返回明确错误码" % svc,
+                  "file": svc,
+                  "symbols": ["create_%s()" % single],
+                  "assertion": "查重 → 校验 → 写库，重复输入被拒",
+                  "est_lines": 35})
+    endpoint = ("POST /api/register" if "注册" in text else "POST /api/login" if "登录" in text
+                else "POST /api/%s" % plural)
+    endpoint_title = ("注册接口" if "注册" in text else "登录接口" if "登录" in text
+                      else "%s接口" % cn)
+    steps.append({"title": endpoint_title,
+                  "how": "写 %s：入参校验 → 调服务 → 统一返回体" % api,
+                  "file": api,
+                  "symbols": [endpoint],
+                  "assertion": "201/400/409 三类返回正确" if auth else "成功/参数错误两类返回正确",
+                  "est_lines": 30})
+    steps.append({"title": "单测：正常路径",
+                  "how": "写 %s：一条走通的用例，断言返回与落库结果" % test,
+                  "file": test,
+                  "symbols": ["test_%s_ok()" % single],
+                  "assertion": "主流程通过，库里有记录",
+                  "est_lines": 15})
+    steps.append({"title": "单测：异常与边界",
+                  "how": "写 %s：重复、缺字段、非法值各一条" % test,
+                  "file": test,
+                  "symbols": ["test_%s_bad()" % single],
+                  "assertion": "错误码正确，不写脏数据",
+                  "est_lines": 20})
+    return steps[:8]
+
+
 def _steps_for(kind, module, role, acceptance):
-    """把任务拆成 2-4 个子步骤：每一步都写清"做什么 + 怎么做"。"""
+    """把任务拆成子步骤：每一步都写清"做什么 + 怎么做"，实现类尽量落到符号。"""
     slug = _module_slug(module)
     if kind == "foundation":
         return [{"title": "建立目录与运行入口", "how": "创建 src/、tests/ 目录与 README，给出启动命令"},
@@ -1223,6 +1367,8 @@ def _steps_for(kind, module, role, acceptance):
         return [{"title": "定义接口与数据结构", "how": "写 docs/design-%s.md：接口表、字段表、错误码" % slug},
                 {"title": "对齐验收条款", "how": "逐条映射验收标准到接口或数据结构"}]
     if kind == "implementation":
+        if role == "后端":
+            return _feature_steps(module, role, acceptance)
         files = _impl_files(module, role)
         steps = [{"title": "实现数据模型", "how": "写 %s" % files[1] if len(files) > 1 else "定义数据结构"}]
         steps.append({"title": "实现业务逻辑与接口", "how": "写 %s" % files[0]})
@@ -1573,10 +1719,18 @@ def decompose_spec(spec):
                        how="写 models；建表/改表脚本放 migrations/，含唯一键与外键",
                        files=["src/models/%s.py" % slug,
                               "migrations/001_%s.sql" % slug],
-                       steps=[{"title": "建表 %s" % t, "how": "按规格字段表定义类型、约束与索引"}
+                       steps=[{"title": "建表 %s" % t,
+                               "how": "按规格字段表定义类型、约束与索引",
+                               "file": "migrations/001_%s.sql" % slug,
+                               "symbols": ["CREATE TABLE %s" % t],
+                               "assertion": "表结构与规格一致",
+                               "est_lines": 15}
                               for t in mine_tbls[:4]]
                              + [{"title": "迁移可重复执行",
-                                 "how": "写 up/down 脚本并跑两遍，确认幂等"}],
+                                 "how": "写 up/down 脚本并跑两遍，确认幂等",
+                                 "file": "migrations/001_%s.sql" % slug,
+                                 "assertion": "连跑两次结果一致",
+                                 "est_lines": 10}],
                        acceptance_sources=["%s/derived/data-model" % module_ref])
             deps = [data["id"]]
             data_count += 1
@@ -1591,18 +1745,28 @@ def decompose_spec(spec):
                               "、".join(_endpoint_label(*e) for e in mine_eps[:4])),
                       how="按规格的请求/响应与错误码实现，入参校验 + 鉴权拦截",
                       files=["src/api/%s.py" % slug],
-                      steps=[{"title": _endpoint_label(*e), "how": "请求校验 → 业务处理 → 统一返回体"}
+                      steps=[{"title": _endpoint_label(*e),
+                              "how": "请求校验 → 业务处理 → 统一返回体",
+                              "file": "src/api/%s.py" % slug,
+                              "symbols": [_endpoint_label(*e)],
+                              "assertion": "成功分支返回统一结构",
+                              "est_lines": 25}
                              for e in mine_eps[:4]]
                             + [{"title": "接口自测",
-                                "how": "用 curl 或 unittest 打通成功、参数错误、未登录三条分支"}],
+                                "how": "用 curl 或 unittest 打通成功、参数错误、未登录三条分支",
+                                "file": "src/api/%s.py" % slug,
+                                "assertion": "三条分支都有明确返回",
+                                "est_lines": 15}],
                       acceptance_sources=["%s/derived/api" % module_ref])
             deps = [api["id"]]
             api_count += 1
 
+        impl_steps = _steps_for("implementation", m, role, acc)
+        impl_files = _step_files(impl_steps) or _impl_files(m, role)
         impl = add("「%s」功能实现" % m["name"], m, role, priority, estimate, deps, acc,
                    kind="implementation", part="feature", out_schema="code-result-v1",
                    what=_impl_what(m, acc), how=_impl_how(m, role, acc),
-                   files=_impl_files(m, role), acceptance_sources=acc_sources)
+                   files=impl_files, steps=impl_steps, acceptance_sources=acc_sources)
 
         test = add("「%s」单元测试与回归" % m["name"], m, "测试", priority,
                    1 + (1 if len(acc) >= 3 else 0), [impl["id"]],

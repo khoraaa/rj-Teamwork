@@ -684,7 +684,13 @@ table.att td{padding:3px 5px; color:#475569; border-bottom:1px solid #f1f5f9}
 }
 .step-list { margin: 0; padding-left: 18px; }
 .step-list li { font-size: 12px; color: #475569; line-height: 1.6; margin-bottom: 7px; }
+.step-list li.step-item {
+  cursor: pointer; border: 1px solid transparent; border-radius: 8px;
+  padding: 4px 8px 4px 4px; transition: background .12s ease, border-color .12s ease;
+}
+.step-list li.step-item:hover { background: #f1f5f9; border-color: var(--line); }
 .step-list li .step-copy { min-width: 0; }
+.step-list li .step-meta { color: #64748b; font-size: 11px; }
 .step-preview-btn { margin-top: 4px; }
 .step-list li b { color: #1e293b; }
 .step-list li span { display: block; color: #64748b; }

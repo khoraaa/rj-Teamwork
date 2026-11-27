@@ -1358,10 +1358,21 @@ function taskBlock(n) {
     ${(t.files || []).length ? `<div class="section-title">落点文件</div>
       <div class="chips">${t.files.map(f => `<span class="chip file">${esc(f)}</span>`).join('')}</div>` : ''}
     ${(t.steps || []).length ? `<div class="section-title">子步骤（${t.steps.length}）</div>
-      <ol class="step-list">${t.steps.map((st, i) => `<li><div class="step-copy"><b>${esc(st.title || '')}</b>${
-        st.how ? '<span>' + esc(st.how) + '</span>' : ''}</div>
-        <button class="btn sm ghost step-preview-btn" onclick="previewStepCode('${esc(t.id)}', ${i})"
-          ${!(t.files || []).length ? 'disabled title="此任务未关联目标文件"' : 'title="查看本次运行已生成的真实代码（只读）"'}>查看代码</button></li>`).join('')}</ol>` : ''}
+      <div class="insp-hint">点任意一步，看这一步的代码；可切整文件。</div>
+      <ol class="step-list">${t.steps.map((st, i) => {
+        const meta = [];
+        if ((st.symbols || []).length) meta.push('产出 ' + st.symbols.join('、'));
+        if (st.assertion) meta.push('验收：' + st.assertion);
+        if (st.est_lines) meta.push('~' + st.est_lines + ' 行');
+        return `<li class="step-item" onclick="previewStepCode('${esc(t.id)}', ${i})"
+          title="${esc(st.file || '')}">
+          <div class="step-copy"><b>${esc(st.title || '')}</b>${
+            st.how ? '<span>' + esc(st.how) + '</span>' : ''}${
+            meta.length ? '<span class="step-meta">' + esc(meta.join(' · ')) + '</span>' : ''}</div>
+          <button type="button" class="btn sm ghost step-preview-btn"
+            onclick="event.stopPropagation(); previewStepCode('${esc(t.id)}', ${i})"
+            ${!(t.files || []).length && !st.file ? 'disabled title="此任务未关联目标文件"' : ''}>查看代码</button></li>`;
+      }).join('')}</ol>` : ''}
     <div class="section-title">验收条款</div>
     <div class="task-acceptance">${taskAcceptanceHTML(t)}</div>` : '';
   if (!isPmNode(n) && !t) return info;
@@ -1393,20 +1404,56 @@ function gotoTask(tid) {
 
 const codePreview = { code: '', path: '', symbols: [], active: -1, whole: false };
 
-function previewStepText(taskId, stepIndex) {
+function previewStepOf(taskId, stepIndex) {
   const task = ((app.def && app.def.tasks) || []).find(t => t.id === taskId);
-  const step = task && (task.steps || [])[stepIndex];
-  return step ? ((step.title || '') + ' ' + (step.how || '')) : '';
+  const steps = (task && task.steps) || [];
+  return steps[stepIndex] || null;
+}
+
+function previewStepText(taskId, stepIndex) {
+  const step = previewStepOf(taskId, stepIndex);
+  if (!step) return '';
+  return [step.title || '', step.how || '', (step.symbols || []).join(' ')].join(' ');
+}
+
+function _normSymbol(s) {
+  return String(s || '').toLowerCase().replace(/[()_\-\s]/g, '');
+}
+
+// 计划符号 → 真实符号：忽略大小写与括号，取“create_user()”“POST /api/register”这类名字
+function previewPlannedIndex(taskId, stepIndex) {
+  const step = previewStepOf(taskId, stepIndex);
+  if (!step || !(step.symbols || []).length) return -1;
+  const tokens = [];
+  (step.symbols || []).forEach(raw => {
+    const head = String(raw || '').split('(')[0];
+    [head, head.split('/').pop()].forEach(x => {
+      const n = _normSymbol(x);
+      if (n.length >= 3) tokens.push(n);
+    });
+  });
+  let best = -1;
+  let bestLen = 0;
+  codePreview.symbols.forEach((sym, i) => {
+    const name = _normSymbol(sym.name);
+    if (!name) return;
+    tokens.forEach(tok => {
+      if ((name === tok || name.includes(tok) || tok.includes(name)) && tok.length > bestLen) {
+        best = i;
+        bestLen = tok.length;
+      }
+    });
+  });
+  return best;
 }
 
 function previewGuessSymbol(text) {
-  const norm = s => String(s || '').toLowerCase().replace(/[_\-\s]/g, '');
-  const step = norm(text);
+  const step = _normSymbol(text);
   if (!step) return -1;
   let best = -1;
   let bestScore = 0;
   codePreview.symbols.forEach((sym, i) => {
-    const name = norm(sym.name);
+    const name = _normSymbol(sym.name);
     if (!name) return;
     let score = 0;
     if (step.includes(name)) score = name.length + 2;
@@ -1502,13 +1549,15 @@ async function previewStepCode(taskId, stepIndex) {
     };
     codePreview.code = result.code || '';
     codePreview.symbols = result.symbols || [];
-    codePreview.active = previewGuessSymbol(previewStepText(taskId, stepIndex));
+    const planned = previewPlannedIndex(taskId, stepIndex);
+    codePreview.active = planned >= 0 ? planned : previewGuessSymbol(previewStepText(taskId, stepIndex));
     codePreview.whole = !codePreview.symbols.length;
     const conf = { high: '高置信', medium: '中置信', low: '低置信' }[result.symbol_confidence] || '';
     const extra = result.symbols && result.symbols.length
       ? ' · 识别到 ' + result.symbols.length + ' 个符号' + (conf ? '（' + conf + '）' : '')
       : ' · 未识别到符号，按整文件显示';
     status.textContent = (notes[result.source] || notes.workspace) + extra
+      + (planned >= 0 ? ' · 已定位到计划符号' : '')
       + (result.symbol_note ? ' · ' + result.symbol_note : '')
       + (result.truncated ? ' · 文件较大，已截断显示' : '');
     previewRender();
