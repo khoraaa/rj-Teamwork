@@ -495,6 +495,7 @@ class LLMClient:
             calls.append({"id": c.get("id"), "name": fn.get("name"), "arguments": args})
         usage = data.get("usage") or {}
         return {"content": msg.get("content") or "", "tool_calls": calls,
+                "reasoning": msg.get("reasoning_content") or "",
                 "usage": {"in": usage.get("prompt_tokens", 0),
                           "out": usage.get("completion_tokens", 0)},
                 "finish": choice.get("finish_reason"), "raw": data}
