@@ -1180,10 +1180,10 @@ def _impl_files(module, role):
     """按角色给出该模块的落地文件——写代码的 Agent 需要明确的落点。"""
     slug = _module_slug(module)
     if role == "前端":
-        return ["src/%s/view.js" % slug, "src/%s/style.css" % slug, "tests/test_%s_ui.js" % slug]
+        return ["src/%s/view.js" % slug, "src/%s/style.css" % slug]
     if role == "运维":
         return ["deploy/%s.md" % slug, "src/%s/healthcheck.py" % slug]
-    return ["src/%s/service.py" % slug, "src/%s/models.py" % slug, "tests/test_%s.py" % slug]
+    return ["src/%s/service.py" % slug, "src/%s/models.py" % slug, "src/api/%s.py" % slug]
 
 
 def _impl_how(module, role, acceptance):
@@ -1197,7 +1197,7 @@ def _impl_how(module, role, acceptance):
         base = ("Python 标准库实现：models.py 放数据模型与校验，service.py 放业务逻辑与接口路由，"
                 "不引第三方依赖")
     if acceptance:
-        base += "；完成后按验收条款逐条自测（取第一条条款写一条用例）"
+        base += "；完成后按验收条款逐条自查，测试留给后面的测试节点"
     return base
 
 
@@ -1224,6 +1224,9 @@ ENTITY_GLOSS = {
     "文件": ("file", "files"), "角色": ("role", "roles"), "权限": ("permission", "permissions"),
     "日志": ("log", "logs"), "任务": ("task", "tasks"), "项目": ("project", "projects"),
     "评论": ("comment", "comments"), "优惠券": ("coupon", "coupons"), "购物车": ("cart", "carts"),
+    "信息流": ("feed", "feeds"), "推荐": ("feed", "feeds"), "笔记": ("note", "notes"),
+    "点赞": ("like", "likes"), "关注": ("follow", "follows"), "告警": ("alert", "alerts"),
+    "草稿": ("draft", "drafts"), "内容": ("post", "posts"), "风控": ("risk", "risks"),
 }
 ENTITY_SUFFIX = ("功能实现", "功能", "实现", "模块", "管理", "服务", "接口", "页面", "系统", "流程", "设计")
 
@@ -1242,7 +1245,10 @@ def _entity_of(module):
             break
     base = base.strip() or (module.get("name") or "业务")
     fallback = _module_slug(module).replace("-", "_")
-    return base, fallback, fallback
+    if re.match(r"^m\d+$", fallback):
+        fallback = "item"
+    plural = fallback if fallback.endswith("s") else fallback + "s"
+    return base, fallback, plural
 
 
 def _step_files(steps):
@@ -1256,146 +1262,261 @@ def _step_files(steps):
     return files
 
 
-def _feature_steps(module, role, acceptance):
-    """实现类任务的子步骤：按“代码形态”拼，不按功能写死。
+# 能力词表：一条“要做什么”的小句命中这里，就得到落点文件、计划符号和判定标准。
+# 它描述的是“代码形态”（校验/鉴权/状态机/查询…），不是某个具体功能，
+# 所以换一个规格仍然适用；没命中的小句退回 service.py，由标题去定位。
+CAPABILITIES = [
+    (("登录", "认证", "鉴权"), "service.py",
+     ["login()", "issue_token()"], "正确凭证能换到令牌，错误凭证被拒",
+     "校验凭证 → 签发令牌，失败分支与错误码明确"),
+    (("密码", "哈希", "加密"), "security.py",
+     ["hash_password()", "verify_password()"], "明文不落库，正确密码可通过",
+     "加盐后单向哈希；校验复用同一算法"),
+    (("验证码", "短信", "邮件"), "notify.py",
+     ["send_code()", "verify_code()"], "验证码可发送、可校验、会过期",
+     "生成带有效期的码，校验成功后作废"),
+    (("令牌", "会话", "登录态", "token"), "service.py",
+     ["issue_token()", "verify_token()"], "有效期内可换到令牌，过期被拒",
+     "签发与校验成对出现，过期时间可配置"),
+    (("锁定", "失败次数", "限流"), "service.py",
+     ["record_failure()", "is_locked()"], "达到阈值后拒绝，冷却后恢复",
+     "失败计数 + 冷却窗口"),
+    (("注册", "查重", "唯一"), "service.py",
+     ["create_{s}()", "exists_{s}()"], "重复输入被拒，且不写脏数据",
+     "先查重再写入"),
+    (("支付", "扣款", "收款"), "service.py",
+     ["create_payment()", "mark_paid()"], "金额与状态正确",
+     "金额用最小货币单位，状态单向流转"),
+    (("退款",), "service.py",
+     ["refund()"], "退款后状态可回滚",
+     "记录原单号、金额与原因"),
+    (("对账",), "service.py",
+     ["reconcile()"], "差异能逐条列出来",
+     "按日切分，输出差异清单"),
+    (("回调", "幂等"), "service.py",
+     ["handle_callback()"], "重复回调不重复入账",
+     "按事件 id 去重"),
+    (("审核", "审批", "驳回"), "service.py",
+     ["approve()", "reject()"], "非法状态流转被拒",
+     "状态机限定合法边"),
+    (("列表", "分页", "搜索", "筛选"), "service.py",
+     ["list_{p}()"], "空结果与越界页不报错",
+     "参数边界收紧，返回总数"),
+    (("导入", "导出"), "service.py",
+     ["import_rows()", "export_rows()"], "格式错误有明确提示",
+     "逐行校验后入库"),
+    (("权限", "角色", "越权"), "security.py",
+     ["check_permission()"], "越权请求被拒",
+     "按角色与资源判定"),
+    (("日志", "审计", "留痕"), "audit.py",
+     ["log_event()"], "事件字段完整、可按条件查询",
+     "只追加不改写"),
+    (("通知", "推送", "消息"), "notify.py",
+     ["send_notice()"], "发送失败有重试与记录",
+     "失败落库，可重放"),
+    (("缓存",), "cache.py",
+     ["get_cache()", "set_cache()"], "命中、失效都符合预期",
+     "带 TTL 与显式失效"),
+    (("定时", "调度", "重试"), "jobs.py",
+     ["run_job()"], "重复执行不产生重复数据",
+     "带幂等键"),
+    (("上传", "文件"), "storage.py",
+     ["save_file()"], "类型与大小被校验",
+     "白名单 + 大小上限"),
+    (("清理", "过期", "保留"), "jobs.py",
+     ["purge_expired()"], "过期数据被清掉，未过期保留",
+     "按时间阈值扫描"),
+    (("模型", "字段", "实体", "表结构"), "models.py",
+     ["class {cls}", "validate_{s}()"], "非法字段被拒",
+     "数据类 + 校验函数"),
+]
 
-    每一行都带 file / symbols / assertion / est_lines：
-    - symbols 是计划里该出现的符号，跑完后可用 symbols.py 去真实文件里核对；
-    - assertion 是“这一步怎么算做完”，短句、可判定；
-    - est_lines 只是参考值，真实行数以生成结果为准。
+
+def _brief(text, limit=80):
+    """单行摘要：去掉换行与多余空白，超长截断并加省略号。"""
+    line = re.sub(r"\s+", " ", str(text or "")).strip()
+    return line if len(line) <= limit else line[:limit - 1] + "…"
+
+
+def _clauses(text):
+    """把目标拆成可执行的小句：逗号/分号/句号/“并且”切开，去掉序号与空白。"""
+    parts = re.split(r"[，,；;。\n]+|(?:并且|同时|以及)", str(text or ""))
+    out = []
+    for p in parts:
+        p = p.strip(" \t\u3000·、0123456789.（）()")
+        if len(p) >= 2 and p not in out:
+            out.append(p)
+    return out
+
+
+def _cap_of(clause, hint=""):
+    """小句 → 能力条目。
+
+    同一个词可能命中多条（“登录日志”既能算登录也能算审计），所以先看
+    模块名里有没有这个词——模块叫“安全审计”时，日志优先于登录。
+    """
+    low = clause.lower()
+    hint_low = (hint or "").lower()
+    best, best_key = None, None
+    for item in CAPABILITIES:
+        for k in item[0]:
+            k_low = k.lower()
+            if k_low not in low:
+                continue
+            pos = [hint_low.index(x) for x in item[0] if x in hint_low]
+            key = (1 if pos else 0, -(min(pos) if pos else 10 ** 6),
+                   -low.index(k_low), len(k_low))
+            if best_key is None or key > best_key:
+                best, best_key = item, key
+    return best
+
+
+def _impl_steps(module, role, acceptance, has_data=False, has_api=False):
+    """功能实现类任务的子步骤：从“这个模块要做什么”拆，不套固定模板。
+
+    - 每个小句一步，标题就是那句话，做到哪写到哪；
+    - 命中能力词表时给出落点文件、计划符号、判定标准；
+    - 测试不在这里做（单元测试是后面测试节点的事），
+      已经单独拆出数据任务/接口任务时，这里也不重复建表、写路由。
     """
     cn, single, plural = _entity_of(module)
     slug = _module_slug(module)
-    text = " ".join([(module.get("name") or ""), (module.get("goal") or "")]
-                    + [str(a) for a in (acceptance or [])]).lower()
-    auth = any(w in text for w in ("登录", "注册", "密码", "鉴权", "认证", "token", "session", "权限"))
-    pay = any(w in text for w in ("支付", "扣款", "退款", "对账", "回调", "账单"))
-    review = any(w in text for w in ("审核", "审批", "驳回"))
-    listing = any(w in text for w in ("列表", "查询", "分页", "搜索", "筛选"))
-
-    sql = "migrations/001_%s.sql" % slug
-    model = "src/%s/models.py" % slug
-    sec = "src/%s/security.py" % slug
     svc = "src/%s/service.py" % slug
     api = "src/api/%s.py" % slug
-    test = "tests/test_%s.py" % slug
     cls = "".join(part.capitalize() for part in single.split("_"))
 
-    steps = [
-        {"title": "建%s表" % cn,
-         "how": "写 %s：主键、唯一索引、时间戳字段" % sql,
-         "file": sql,
-         "symbols": ["CREATE TABLE %s" % plural],
-         "assertion": "表存在，唯一键生效",
-         "est_lines": 15},
-        {"title": "%s实体与字段校验" % cn,
-         "how": "写 %s：数据类 + 字段校验（非法输入抛 ValueError）" % model,
-         "file": model,
-         "symbols": ["class %s" % cls, "validate_%s()" % single],
-         "assertion": "非法输入被拒",
-         "est_lines": 25},
-    ]
-    if auth:
-        steps.append({"title": "密码哈希与校验",
-                      "how": "写 %s：hash_password / verify_password，不存明文" % sec,
-                      "file": sec,
-                      "symbols": ["hash_password()", "verify_password()"],
-                      "assertion": "明文不落库，正确密码可通过",
-                      "est_lines": 20})
-    if pay:
-        steps.append({"title": "支付状态机与回调",
-                      "how": "写 %s：待支付 → 已支付 → 已退款，回调幂等" % svc,
-                      "file": svc,
-                      "symbols": ["mark_paid()", "handle_callback()"],
-                      "assertion": "重复回调不重复入账",
-                      "est_lines": 35})
-    if review:
-        steps.append({"title": "审核状态机",
-                      "how": "写 %s：待审 → 通过 / 驳回，每次流转记审计" % svc,
-                      "file": svc,
-                      "symbols": ["approve()", "reject()"],
-                      "assertion": "非法流转被拒",
-                      "est_lines": 25})
-    if listing:
-        steps.append({"title": "%s列表与分页" % cn,
-                      "how": "写 %s：筛选、排序、分页边界" % api,
-                      "file": api,
-                      "symbols": ["GET /api/%s" % plural, "list_%s()" % plural],
-                      "assertion": "空结果与越界页不报错",
-                      "est_lines": 20})
+    if role != "后端":
+        files = _impl_files(module, role)
+        view = files[0]
+        css = files[1] if len(files) > 1 else files[0]
+        return [{"title": "搭%s的页面结构" % cn, "how": "写 %s：骨架、空态、加载态" % css,
+                 "file": css, "symbols": [], "assertion": "页面能打开且结构完整",
+                 "est_lines": 40},
+                {"title": "接%s的数据与交互" % cn, "how": "写 %s：渲染、事件、异常提示" % view,
+                 "file": view, "symbols": [], "assertion": "交互有反馈，异常态可见",
+                 "est_lines": 40}]
 
-    service_title = ("注册服务" if "注册" in text else "登录服务" if "登录" in text
-                     else "%s服务" % cn)
-    steps.append({"title": service_title,
-                  "how": "写 %s：查重 → 校验 → 落库，失败返回明确错误码" % svc,
-                  "file": svc,
-                  "symbols": ["create_%s()" % single],
-                  "assertion": "查重 → 校验 → 写库，重复输入被拒",
-                  "est_lines": 35})
-    endpoint = ("POST /api/register" if "注册" in text else "POST /api/login" if "登录" in text
-                else "POST /api/%s" % plural)
-    endpoint_title = ("注册接口" if "注册" in text else "登录接口" if "登录" in text
-                      else "%s接口" % cn)
-    steps.append({"title": endpoint_title,
-                  "how": "写 %s：入参校验 → 调服务 → 统一返回体" % api,
-                  "file": api,
-                  "symbols": [endpoint],
-                  "assertion": "201/400/409 三类返回正确" if auth else "成功/参数错误两类返回正确",
-                  "est_lines": 30})
-    steps.append({"title": "单测：正常路径",
-                  "how": "写 %s：一条走通的用例，断言返回与落库结果" % test,
-                  "file": test,
-                  "symbols": ["test_%s_ok()" % single],
-                  "assertion": "主流程通过，库里有记录",
-                  "est_lines": 15})
-    steps.append({"title": "单测：异常与边界",
-                  "how": "写 %s：重复、缺字段、非法值各一条" % test,
-                  "file": test,
-                  "symbols": ["test_%s_bad()" % single],
-                  "assertion": "错误码正确，不写脏数据",
-                  "est_lines": 20})
-    return steps[:8]
+    goal = module.get("goal") or ""
+    clauses = _clauses(goal)[:5] or [module.get("name") or "业务逻辑"]
+    steps, used_models = [], False
+    hint = module.get("name") or ""
+    for clause in clauses:
+        cap = _cap_of(clause, hint)
+        if cap:
+            fname = cap[1]
+            used_models = used_models or fname == "models.py"
+            steps.append({
+                "title": _brief(clause, 40),
+                "how": cap[4],
+                "file": "src/%s/%s" % (slug, fname),
+                "symbols": [s.replace("{s}", single).replace("{p}", plural) for s in cap[2]],
+                "assertion": cap[3],
+                "est_lines": 25,
+            })
+        else:
+            steps.append({"title": _brief(clause, 40),
+                          "how": "写 %s：把这条行为落成函数，入参、返回值、失败分支写清楚" % svc,
+                          "file": svc, "symbols": [], "assertion": _brief(clause, 40),
+                          "est_lines": 25})
+    if not has_data and not used_models:
+        steps.insert(0, {"title": "定义%s的数据结构" % cn,
+                         "how": "写 src/%s/models.py：数据类 + 字段校验" % slug,
+                         "file": "src/%s/models.py" % slug,
+                         "symbols": ["class %s" % cls, "validate_%s()" % single],
+                         "assertion": "字段与规格一致，非法输入被拒",
+                         "est_lines": 25})
+    if not has_api:
+        steps.append({"title": "接通%s的调用入口" % cn,
+                      "how": "写 %s：入参校验 → 调服务 → 统一返回体" % api,
+                      "file": api, "symbols": ["POST /api/%s" % plural],
+                      "assertion": "成功与失败两类返回结构一致",
+                      "est_lines": 30})
+    if len(steps) < 2:
+        steps.append({"title": "补齐%s的失败分支" % cn,
+                      "how": "写 %s：把拒绝、未找到、冲突各类错误码补齐" % svc,
+                      "file": svc, "symbols": ["handle_error()"],
+                      "assertion": "失败路径都有明确错误码", "est_lines": 15})
+    return steps
 
 
-def _steps_for(kind, module, role, acceptance):
+def _test_steps(module, acceptance):
+    """测试节点：一条验收条款一条用例，最后统一跑一遍。"""
+    slug = _module_slug(module)
+    test = "tests/test_%s.py" % slug
+    steps = []
+    for i, a in enumerate((acceptance or [])[:6]):
+        steps.append({"title": "用例：%s" % _brief(a, 40),
+                      "how": "写 %s::test_case_%d，只断言这一条" % (test, i + 1),
+                      "file": test, "symbols": ["test_case_%d()" % (i + 1)],
+                      "assertion": str(a)[:80], "est_lines": 12})
+    if not steps:
+        steps = [{"title": "用例：正常路径", "how": "写 %s::test_ok" % test,
+                  "file": test, "symbols": ["test_ok()"], "assertion": "主流程通过",
+                  "est_lines": 15},
+                 {"title": "用例：异常路径", "how": "写 %s::test_bad" % test,
+                  "file": test, "symbols": ["test_bad()"], "assertion": "错误码正确",
+                  "est_lines": 15}]
+    steps.append({"title": "跑 pytest 并记录证据",
+                  "how": "python -m pytest -q，把通过/失败/跳过数写进产物",
+                  "file": test, "symbols": [], "assertion": "退出码 0 且用例数大于 0",
+                  "est_lines": 0})
+    return steps
+
+
+def _review_steps(module, acceptance):
+    """评审节点：一条验收条款核对一项，最后给结论。"""
+    steps = [{"title": "核对：%s" % _brief(a, 36),
+              "how": "读实现与用例，标出未满足项与证据位置",
+              "assertion": str(a)[:60]} for a in (acceptance or [])[:5]]
+    steps.append({"title": "检查代码质量",
+                  "how": "重复逻辑、异常处理、硬编码、越界与注入风险"})
+    steps.append({"title": "给出评审结论", "how": "pass/fail + 阻塞问题清单，必须可执行"})
+    return steps
+
+
+def _design_steps(module, acceptance):
+    """设计节点：把模块目标翻成接口/字段/错误码约定，不写实现。"""
+    slug = _module_slug(module)
+    doc = "docs/design-%s.md" % slug
+    steps = [{"title": "约定「%s」的接口与字段" % _brief(c, 34),
+              "how": "写 %s：请求/响应字段、类型、必填项" % doc,
+              "file": doc, "assertion": "字段与规格一致，无遗漏"}
+             for c in (_clauses(module.get("goal"))[:3] or [module.get("name") or "模块"])]
+    steps.append({"title": "定义错误码与返回结构",
+                  "how": "写 %s：成功/参数错误/冲突/未授权各自的码与体" % doc,
+                  "file": doc, "assertion": "每个失败分支都有唯一错误码"})
+    steps.append({"title": "对齐 %d 条验收条款" % len(acceptance or []),
+                  "how": "逐条标注由哪个接口或字段满足，缺口单列"})
+    return steps
+
+
+def _steps_for(kind, module, role, acceptance, has_data=False, has_api=False):
     """把任务拆成子步骤：每一步都写清"做什么 + 怎么做"，实现类尽量落到符号。"""
     slug = _module_slug(module)
     if kind == "foundation":
         return [{"title": "建立目录与运行入口", "how": "创建 src/、tests/ 目录与 README，给出启动命令"},
                 {"title": "建立测试基线", "how": "python -m pytest -q 能跑起来（哪怕只有 1 条用例）"}]
     if kind == "design":
-        return [{"title": "定义接口与数据结构", "how": "写 docs/design-%s.md：接口表、字段表、错误码" % slug},
-                {"title": "对齐验收条款", "how": "逐条映射验收标准到接口或数据结构"}]
+        return _design_steps(module, acceptance)
     if kind == "implementation":
-        if role == "后端":
-            return _feature_steps(module, role, acceptance)
-        files = _impl_files(module, role)
-        steps = [{"title": "实现数据模型", "how": "写 %s" % files[1] if len(files) > 1 else "定义数据结构"}]
-        steps.append({"title": "实现业务逻辑与接口", "how": "写 %s" % files[0]})
-        if len(files) > 2:
-            steps.append({"title": "补最小可运行用例", "how": "写 %s 并跑通" % files[-1]})
-        if acceptance:
-            steps.append({"title": "按验收条款自测", "how": "逐条对照：%s" %
-                          str(acceptance[0])[:40]})
-        return steps
+        return _impl_steps(module, role, acceptance, has_data, has_api)
     if kind == "verification":
-        return [{"title": "设计用例矩阵", "how": "正常路径 / 边界 / 异常各至少 1 条"},
-                {"title": "落地测试文件", "how": "写 tests/test_%s.py，用 pytest 断言" % slug},
-                {"title": "跑测试并记录证据", "how": "python -m pytest -q，把通过/失败数写进产物"}]
+        return _test_steps(module, acceptance)
     if kind == "review":
-        return [{"title": "对照验收条款检查实现", "how": "逐条读代码，标出未满足项"},
-                {"title": "检查代码质量", "how": "重复逻辑、异常处理、硬编码、越界与注入风险"},
-                {"title": "给出结论", "how": "阻塞问题必须列出，最后给 pass/fail"}]
-    if kind in ("integration", "delivery"):
-        return [{"title": "装配所有模块", "how": "确认入口能同时加载各模块的接口"},
-                {"title": "端到端跑主流程", "how": "python -m pytest -q 跑一遍全量用例"},
-                {"title": "整理交付清单", "how": "列出产出文件、启动方式、遗留风险"}]
+        return _review_steps(module, acceptance)
+    if kind == "integration":
+        return [{"title": "装配各模块入口", "how": "确认一份入口能同时加载所有模块的接口"},
+                {"title": "端到端跑主流程", "how": "按第一个模块的目标串一条完整链路"},
+                {"title": "全量回归", "how": "python -m pytest -q 跑一遍，对比改动前后"}]
+    if kind == "delivery":
+        return [{"title": "写运行说明", "how": "启动命令、端口、依赖版本"},
+                {"title": "写配置项说明", "how": "环境变量、数据目录、默认值"},
+                {"title": "列出已知风险与回滚", "how": "遗留问题、影响范围、怎么退回上一版"}]
     return [{"title": "执行任务", "how": "按验收标准完成"}]
 
 
 ENDPOINT_RE = re.compile(r"\b(GET|POST|PUT|PATCH|DELETE)\s+(/api/[\w/{}\-.:]+)", re.I)
 TABLE_HEAD_RE = re.compile(r"^\*\*\s*([A-Za-z_][\w]*)\s+([^*]{1,20}?表)\s*\*\*", re.M)
-
 
 def _bigrams(text):
     text = re.sub(r"[\s，,。.;；:：()（）\[\]/、*_`|-]+", "", text or "")
@@ -1530,6 +1651,62 @@ def _attach_symbols(payload, code, target):
     return payload
 
 
+def _norm_symbol_name(name):
+    """把「class User」「create_user()」「POST /api/register」都收敛成可比较的名字。"""
+    text = str(name or "").strip().lower()
+    text = re.sub(r"\((.*?)\)", " ", text)
+    text = text.split("/")[-1]
+    text = re.sub(r"\b(post|get|put|patch|delete|class|def|function|func|fn|struct|"
+                  r"interface|type|export|public|private|static|async|const|let|var)\b",
+                  " ", text)
+    text = re.sub(r"[^a-z0-9_]+", " ", text)
+    return re.sub(r"[^a-z0-9]+", "", text)
+
+
+def _step_code_slice(step, code, symbols):
+    """按子步骤计划产出的符号，从整份代码里切出这一步对应的片段。"""
+    planned = [_norm_symbol_name(s) for s in (step.get("symbols") or [])]
+    planned = [p for p in planned if p]
+    if not planned or not symbols:
+        return None
+    hits = []
+    for sym in symbols:
+        name = _norm_symbol_name(sym.get("name"))
+        if not name:
+            continue
+        for want in planned:
+            if name == want or (len(want) >= 3 and want in name) \
+                    or (len(name) >= 3 and name in want):
+                hits.append(sym)
+                break
+    if not hits:
+        return None
+    lines = code.split("\n")
+    start = min(int(s.get("start") or 1) for s in hits)
+    end = max(int(s.get("end") or start) for s in hits)
+    start = max(1, start)
+    end = min(len(lines), end)
+    if end < start:
+        return None
+    return {"code": "\n".join(lines[start - 1:end]), "start": start, "end": end,
+            "names": [str(s.get("name") or "") for s in hits]}
+
+
+def _preview_payload(payload, step, code, target, whole=False):
+    """子步骤默认只返回这一步的代码；whole=1 时才返回整份文件。"""
+    payload = _attach_symbols(payload, code, target)
+    sliced = None if whole else _step_code_slice(step, code, payload.get("symbols") or [])
+    if sliced:
+        payload["code"] = sliced["code"]
+        payload["slice"] = {"start": sliced["start"], "end": sliced["end"],
+                            "names": sliced["names"]}
+        payload["granularity"] = "symbol"
+    else:
+        payload["slice"] = None
+        payload["granularity"] = "file"
+    return payload
+
+
 def _generate_step_code(task, step, target, ai_id=None):
     """模拟运行没有落盘文件时，按任务+子步骤让模型生成一次文件内容。"""
     conf = SETTINGS.spec(ai_id) if ai_id else SETTINGS.data
@@ -1559,7 +1736,7 @@ def _generate_step_code(task, step, target, ai_id=None):
                                             % (target, doing, how)},
             ]
         reply = LLM.chat(messages, timeout=120, temperature=0.2,
-                         max_tokens=8000, ai_id=ai_id)
+                         max_tokens=16000, ai_id=ai_id)
         finish = reply.get("finish") or ""
         if reply.get("reasoning"):
             saw_reasoning = True
@@ -1752,16 +1929,42 @@ def decompose_spec(spec):
                               "assertion": "成功分支返回统一结构",
                               "est_lines": 25}
                              for e in mine_eps[:4]]
-                            + [{"title": "接口自测",
-                                "how": "用 curl 或 unittest 打通成功、参数错误、未登录三条分支",
+                            + [{"title": "统一返回体与错误码",
+                                "how": "在同一文件里收口成功/参数错误/未登录三类返回",
                                 "file": "src/api/%s.py" % slug,
-                                "assertion": "三条分支都有明确返回",
-                                "est_lines": 15}],
+                                "symbols": ["_respond()"],
+                                "assertion": "三类返回结构一致",
+                                "est_lines": 10}],
                       acceptance_sources=["%s/derived/api" % module_ref])
             deps = [api["id"]]
             api_count += 1
 
-        impl_steps = _steps_for("implementation", m, role, acc)
+        impl_steps = _steps_for("implementation", m, role, acc,
+                                has_data=bool(mine_tbls), has_api=bool(mine_eps))
+        # 全局约束里如果点名了某种代码形态（例如“密码只存哈希”），补成一条实现步骤，
+        # 已经覆盖到的就不重复加。
+        used_syms = {sym for st in impl_steps for sym in (st.get("symbols") or [])}
+        module_text = " ".join([(m.get("name") or ""), (m.get("goal") or "")]
+                               + [str(a) for a in acc])
+        for c in constraints:
+            text_c = str(c)
+            # “差异率 < 0.01% 才算通过验收”这类是验收口径，不是代码形态，跳过
+            if re.search(r"验收|通过|%|率|ms|毫秒|秒", text_c):
+                continue
+            cap = _cap_of(text_c, module_text)
+            if not cap or not any(k in module_text for k in cap[0]):
+                continue
+            syms = [x.replace("{s}", _entity_of(m)[1]).replace("{p}", _entity_of(m)[2])
+                    for x in cap[2]]
+            if any(x in used_syms for x in syms):
+                continue
+            impl_steps.append({"title": "满足约束：%s" % _brief(c, 34),
+                               "how": cap[4],
+                               "file": "src/%s/%s" % (slug, cap[1]),
+                               "symbols": syms,
+                               "assertion": cap[3],
+                               "est_lines": 15})
+            used_syms.update(syms)
         impl_files = _step_files(impl_steps) or _impl_files(m, role)
         impl = add("「%s」功能实现" % m["name"], m, role, priority, estimate, deps, acc,
                    kind="implementation", part="feature", out_schema="code-result-v1",
@@ -3639,9 +3842,11 @@ class Handler(BaseHTTPRequestHandler):
                 step_index = int(body.get("step_index"))
             except (TypeError, ValueError):
                 return self._json({"ok": False, "message": "子步骤编号无效"}, 400)
-            if not task_id or step_index < 0:
-                return self._json({"ok": False, "message": "任务或子步骤编号无效"}, 400)
             run_id = str(body.get("run_id") or "")
+            whole = str(body.get("whole") or "").lower() in ("1", "true", "yes")
+            generate = str(body.get("generate") or "").lower() in ("1", "true", "yes")
+            if not task_id or (step_index < 0 and not whole):
+                return self._json({"ok": False, "message": "任务或子步骤编号无效"}, 400)
             with ENGINE.lock:
                 live = ENGINE.run if isinstance(ENGINE.run, dict) else {}
                 if not run_id or run_id == live.get("run_id"):
@@ -3660,13 +3865,26 @@ class Handler(BaseHTTPRequestHandler):
                          if str(t.get("id")) == task_id), None)
             if not task:
                 return self._json({"ok": False, "message": "当前工作流中找不到该任务"}, 404)
+            task_files = [str(f) for f in (task.get("files") or []) if str(f).strip()]
             steps = task.get("steps") or []
+            step = {}
             if step_index >= len(steps):
-                return self._json({"ok": False, "message": "找不到该子步骤"}, 404)
-            step = steps[step_index]
-            if not isinstance(step, dict):
-                return self._json({"ok": False, "message": "子步骤格式无效"}, 400)
-            target = _step_target_file(task, step, step_index)
+                if not whole:
+                    return self._json({"ok": False, "message": "找不到该子步骤"}, 404)
+                step_index = -1
+            if step_index >= 0:
+                step = steps[step_index]
+                if not isinstance(step, dict):
+                    return self._json({"ok": False, "message": "子步骤格式无效"}, 400)
+            wanted = str(body.get("path") or "").strip()
+            if wanted:
+                if wanted not in task_files:
+                    return self._json({"ok": False,
+                                       "message": "只能查看这个任务关联的文件：%s"
+                                                  % ("、".join(task_files) or "（无）")}, 400)
+                target = wanted
+            else:
+                target = _step_target_file(task, step, max(step_index, 0))
             if not target:
                 return self._json({"ok": False, "message": "该子步骤没有关联的目标文件"}, 400)
             file_path = _workspace_path(ws_dir, target)
@@ -3685,8 +3903,9 @@ class Handler(BaseHTTPRequestHandler):
                            "task_id": task_id, "step_index": step_index,
                            "path": target, "code": code,
                            "truncated": len(data) > 200000,
-                           "saved": False, "executed": False}
-                return self._json(_attach_symbols(payload, code, target))
+                           "saved": False, "executed": False,
+                           "task_files": task_files}
+                return self._json(_preview_payload(payload, step, code, target, whole))
             cache_path = _preview_cache_file(run_id, task_id, step_index, target)
             if os.path.isfile(cache_path):
                 try:
@@ -3700,14 +3919,25 @@ class Handler(BaseHTTPRequestHandler):
                            "task_id": task_id, "step_index": step_index,
                            "path": target, "code": code,
                            "truncated": len(data) > 200000,
-                           "cached": True, "saved": False, "executed": False}
-                return self._json(_attach_symbols(payload, code, target))
+                           "cached": True, "saved": False, "executed": False,
+                           "task_files": task_files}
+                return self._json(_preview_payload(payload, step, code, target, whole))
+            if not generate:
+                return self._json({"ok": False, "path": target, "missing": True,
+                                   "task_files": task_files,
+                                   "message": "这次运行没有生成 %s。模拟运行不写盘；"
+                                              "要看按任务推演出来的代码，点下面的「生成一次预览」"
+                                              "（只预览，不落盘、不执行）。" % target}, 404)
             # 模拟运行没写文件：按需生成一次并缓存，之后点同一子步骤直接读缓存，不再调模型
             node = next((n for n in (definition.get("nodes") or [])
                          if str(n.get("task_id")) == task_id), None)
             ai_id = ENGINE._ai_for(node) if node else ""
+            gen_step = step
+            if whole and wanted:
+                # 看整份文件时按任务说明生成，不要套第 0 步的说明
+                gen_step = {"title": task.get("title") or "", "how": task.get("how") or ""}
             try:
-                code = _generate_step_code(task, step, target, ai_id or None)
+                code = _generate_step_code(task, gen_step, target, ai_id or None)
             except llm_client.LLMNotConfigured as exc:
                 return self._json({"ok": False, "path": target, "message": str(exc)}, 400)
             except llm_client.LLMError as exc:
@@ -3724,8 +3954,9 @@ class Handler(BaseHTTPRequestHandler):
             payload = {"ok": True, "source": "generated", "run_id": run_id,
                        "task_id": task_id, "step_index": step_index,
                        "path": target, "code": code, "truncated": False,
-                       "cached": cached, "saved": False, "executed": False}
-            return self._json(_attach_symbols(payload, code, target))
+                       "cached": cached, "saved": False, "executed": False,
+                       "task_files": task_files}
+            return self._json(_preview_payload(payload, step, code, target, whole))
         if path == "/api/ais":
             res = SETTINGS.upsert_ai(body or {})
             return self._json({"ok": True, "ai": res, "settings": SETTINGS.public()})

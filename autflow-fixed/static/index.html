@@ -202,14 +202,12 @@
       aria-label="关闭代码预览">×</button>
   </div>
   <div class="code-preview-status" id="stepCodeStatus" role="status"></div>
+  <div class="code-preview-files" id="stepCodeFiles" hidden></div>
   <div class="code-preview-tools">
-    <button class="btn sm ghost" type="button" id="stepCodeWhole" onclick="previewShowWhole()">整文件</button>
     <span class="code-preview-kind" id="stepCodeKind"></span>
+    <button class="btn sm ghost" type="button" id="stepCodeGenerate" onclick="previewGenerateNow()" hidden>生成一次预览</button>
   </div>
-  <div class="code-preview-grid">
-    <aside class="code-symbol-list" id="stepCodeSymbols" aria-label="符号列表"></aside>
-    <pre class="code-preview-body" id="stepCodeBody"></pre>
-  </div>
+  <pre class="code-preview-body" id="stepCodeBody"></pre>
 </dialog>
 
 <!-- 故障提示条：断线 / 请求失败 -->

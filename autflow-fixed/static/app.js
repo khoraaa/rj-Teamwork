@@ -1358,7 +1358,7 @@ function taskBlock(n) {
     ${(t.files || []).length ? `<div class="section-title">落点文件</div>
       <div class="chips">${t.files.map(f => `<span class="chip file">${esc(f)}</span>`).join('')}</div>` : ''}
     ${(t.steps || []).length ? `<div class="section-title">子步骤（${t.steps.length}）</div>
-      <div class="insp-hint">点任意一步，看这一步的代码；可切整文件。</div>
+      <div class="insp-hint">点任意一步，只看这一步的代码；完整文件用下面的按钮。</div>
       <ol class="step-list">${t.steps.map((st, i) => {
         const meta = [];
         if ((st.symbols || []).length) meta.push('产出 ' + st.symbols.join('、'));
@@ -1372,7 +1372,9 @@ function taskBlock(n) {
           <button type="button" class="btn sm ghost step-preview-btn"
             onclick="event.stopPropagation(); previewStepCode('${esc(t.id)}', ${i})"
             ${!(t.files || []).length && !st.file ? 'disabled title="此任务未关联目标文件"' : ''}>查看代码</button></li>`;
-      }).join('')}</ol>` : ''}
+      }).join('')}</ol>
+      <button type="button" class="btn sm ghost step-whole-btn"
+        onclick="previewWholeCode('${esc(t.id)}', 0)">查看完整代码</button>` : ''}
     <div class="section-title">验收条款</div>
     <div class="task-acceptance">${taskAcceptanceHTML(t)}</div>` : '';
   if (!isPmNode(n) && !t) return info;
@@ -1402,7 +1404,7 @@ function gotoTask(tid) {
   if (hit) selectNode(hit.id);
 }
 
-const codePreview = { code: '', path: '', symbols: [], active: -1, whole: false };
+const codePreview = { code: '', path: '', taskId: '', stepIndex: 0, wholeMode: false };
 
 function previewStepOf(taskId, stepIndex) {
   const task = ((app.def && app.def.tasks) || []).find(t => t.id === taskId);
@@ -1413,153 +1415,108 @@ function previewStepOf(taskId, stepIndex) {
 function previewStepText(taskId, stepIndex) {
   const step = previewStepOf(taskId, stepIndex);
   if (!step) return '';
-  return [step.title || '', step.how || '', (step.symbols || []).join(' ')].join(' ');
-}
-
-function _normSymbol(s) {
-  return String(s || '').toLowerCase().replace(/[()_\-\s]/g, '');
-}
-
-// 计划符号 → 真实符号：忽略大小写与括号，取“create_user()”“POST /api/register”这类名字
-function previewPlannedIndex(taskId, stepIndex) {
-  const step = previewStepOf(taskId, stepIndex);
-  if (!step || !(step.symbols || []).length) return -1;
-  const tokens = [];
-  (step.symbols || []).forEach(raw => {
-    const head = String(raw || '').split('(')[0];
-    [head, head.split('/').pop()].forEach(x => {
-      const n = _normSymbol(x);
-      if (n.length >= 3) tokens.push(n);
-    });
-  });
-  let best = -1;
-  let bestLen = 0;
-  codePreview.symbols.forEach((sym, i) => {
-    const name = _normSymbol(sym.name);
-    if (!name) return;
-    tokens.forEach(tok => {
-      if ((name === tok || name.includes(tok) || tok.includes(name)) && tok.length > bestLen) {
-        best = i;
-        bestLen = tok.length;
-      }
-    });
-  });
-  return best;
-}
-
-function previewGuessSymbol(text) {
-  const step = _normSymbol(text);
-  if (!step) return -1;
-  let best = -1;
-  let bestScore = 0;
-  codePreview.symbols.forEach((sym, i) => {
-    const name = _normSymbol(sym.name);
-    if (!name) return;
-    let score = 0;
-    if (step.includes(name)) score = name.length + 2;
-    else if (name.includes(step)) score = 1;
-    if (score > bestScore) { bestScore = score; best = i; }
-  });
-  return best;
+  return step.title || step.how || '';
 }
 
 function previewRender() {
   const body = $('#stepCodeBody');
-  const list = $('#stepCodeSymbols');
-  const kind = $('#stepCodeKind');
-  const wholeBtn = $('#stepCodeWhole');
-  const lines = (codePreview.code || '').split('\n');
-  const syms = codePreview.symbols || [];
-  if (wholeBtn) {
-    wholeBtn.disabled = !syms.length;
-    wholeBtn.textContent = codePreview.whole ? '只看符号' : '整文件';
-  }
-  if (!syms.length) {
-    list.innerHTML = '<div class="code-symbol-empty">未识别到符号</div>';
-    kind.textContent = '整文件显示';
-    body.textContent = codePreview.code || '';
+  if (body) body.textContent = codePreview.code || '';
+}
+
+function previewStepCode(taskId, stepIndex) {
+  return openStepCode(taskId, stepIndex, false, '');
+}
+
+function previewWholeCode(taskId, stepIndex) {
+  return openStepCode(taskId, stepIndex, true, '');
+}
+
+function previewPickFile(path) {
+  return openStepCode(codePreview.taskId, codePreview.stepIndex, true, path);
+}
+
+function previewGenerateNow() {
+  const p = codePreview.path || '';
+  return openStepCode(codePreview.taskId, codePreview.stepIndex, codePreview.wholeMode, p, true);
+}
+
+function previewFileTabs(files, active) {
+  const box = $('#stepCodeFiles');
+  if (!box) return;
+  if (!files || !files.length) {
+    box.hidden = true;
+    box.innerHTML = '';
     return;
   }
-  const active = Math.max(0, codePreview.active);
-  const sym = syms[active];
-  if (codePreview.whole) {
-    body.textContent = codePreview.code || '';
-    kind.textContent = '整文件 · ' + lines.length + ' 行 · 共 ' + syms.length + ' 个符号';
-  } else {
-    const start = Math.max(1, sym.start || 1);
-    const end = Math.min(lines.length, sym.end || lines.length);
-    body.textContent = lines.slice(start - 1, end).join('\n');
-    kind.textContent = (sym.kind || 'symbol') + ' · 第 ' + start + '-' + end + ' 行'
-      + (sym.parent ? ' · 属于 ' + sym.parent : '');
-  }
-  list.innerHTML = syms.map((s, i) => `
-    <button type="button" class="code-symbol-item${i === active && !codePreview.whole ? ' active' : ''}"
-      onclick="previewPickSymbol(${i})" title="${esc(s.name)}">
-      <span class="code-symbol-kind">${esc(s.kind || '')}</span>
-      <span class="code-symbol-name">${esc(s.name)}</span>
-      <span class="code-symbol-range">${s.start}-${s.end}</span>
-    </button>`).join('');
+  box.hidden = false;
+  box.innerHTML = files.map(f =>
+    `<button type="button" class="file-tab${f === active ? ' active' : ''}" data-file="${esc(f)}">${esc(f)}</button>`
+  ).join('');
+  box.querySelectorAll('button').forEach(btn => {
+    btn.onclick = () => previewPickFile(btn.dataset.file);
+  });
 }
 
-function previewPickSymbol(index) {
-  const sym = codePreview.symbols[index];
-  if (!sym) return;
-  codePreview.active = index;
-  codePreview.whole = false;
-  previewRender();
-  const body = $('#stepCodeBody');
-  if (body) body.scrollTop = 0;
-}
-
-function previewShowWhole() {
-  if (!codePreview.symbols.length) return;
-  codePreview.whole = !codePreview.whole;
-  previewRender();
-}
-
-async function previewStepCode(taskId, stepIndex) {
+async function openStepCode(taskId, stepIndex, whole, wantedFile, generate) {
   const dialog = $('#stepCodeDialog');
   const path = $('#stepCodePath');
   const status = $('#stepCodeStatus');
-  const code = $('#stepCodeBody');
-  path.textContent = '正在确定目标文件…';
-  status.textContent = '正在读取本次运行的代码（没有落盘时会生成一次，之后走缓存）…';
-  code.textContent = '';
-  $('#stepCodeSymbols').innerHTML = '';
+  const kind = $('#stepCodeKind');
+  const title = $('#stepCodeTitle');
+  const body = $('#stepCodeBody');
+  const step = previewStepOf(taskId, stepIndex) || {};
+  codePreview.taskId = taskId;
+  codePreview.stepIndex = stepIndex;
+  codePreview.wholeMode = !!whole;
+  const genBtn = $('#stepCodeGenerate');
+  if (genBtn) genBtn.hidden = true;
+  title.textContent = whole ? '完整文件' : (step.title || '子步骤代码');
+  path.textContent = wantedFile || (whole ? '正在读取文件列表…' : '正在确定目标文件…');
+  status.textContent = whole ? '正在读取完整文件…' : '正在读取这一步的代码…';
+  kind.textContent = '';
+  body.textContent = '';
   codePreview.code = '';
-  codePreview.symbols = [];
-  codePreview.active = -1;
-  codePreview.whole = false;
+  if (!whole) previewFileTabs([], '');
   if (!dialog.open) dialog.showModal();
   try {
-    const result = await api('/api/tasks/preview-code', {
+    const payload = {
       task_id: taskId, step_index: stepIndex,
-      run_id: (app.run && app.run.run_id) || ''
-    });
+      run_id: (app.run && app.run.run_id) || '', whole: whole ? 1 : 0
+    };
+    if (whole && wantedFile) payload.path = wantedFile;
+    if (generate) payload.generate = 1;
+    const result = await api('/api/tasks/preview-code', payload);
     if (!result.ok) {
       path.textContent = result.path || '代码不可用';
       status.textContent = result.message || '读取代码失败';
+      codePreview.path = result.path || '';
+      if (whole) previewFileTabs(result.task_files || [], result.path);
+      if (result.missing && genBtn) genBtn.hidden = false;
       return;
     }
+    codePreview.code = result.code || '';
     path.textContent = result.path;
+    if (whole) previewFileTabs(result.task_files || [], result.path);
+    else previewFileTabs([], '');
     const notes = {
       workspace: '来自本次运行的工作区 · 只读',
       cache: '本次查看生成的结果 · 已缓存，不再调模型',
       generated: '运行没有落盘，已按该子步骤生成一次并缓存 · 未执行、未参与测试'
     };
-    codePreview.code = result.code || '';
-    codePreview.symbols = result.symbols || [];
-    const planned = previewPlannedIndex(taskId, stepIndex);
-    codePreview.active = planned >= 0 ? planned : previewGuessSymbol(previewStepText(taskId, stepIndex));
-    codePreview.whole = !codePreview.symbols.length;
-    const conf = { high: '高置信', medium: '中置信', low: '低置信' }[result.symbol_confidence] || '';
-    const extra = result.symbols && result.symbols.length
-      ? ' · 识别到 ' + result.symbols.length + ' 个符号' + (conf ? '（' + conf + '）' : '')
-      : ' · 未识别到符号，按整文件显示';
-    status.textContent = (notes[result.source] || notes.workspace) + extra
-      + (planned >= 0 ? ' · 已定位到计划符号' : '')
-      + (result.symbol_note ? ' · ' + result.symbol_note : '')
-      + (result.truncated ? ' · 文件较大，已截断显示' : '');
+    const note = notes[result.source] || notes.workspace;
+    const slice = result.slice || null;
+    const lines = codePreview.code.split('\n').length;
+    if (whole) {
+      kind.textContent = '整文件 · ' + lines + ' 行';
+      status.textContent = note;
+    } else if (slice) {
+      kind.textContent = '第 ' + slice.start + '–' + slice.end + ' 行 · ' + (slice.names || []).join('、');
+      status.textContent = note + ' · 只显示这一步的代码';
+    } else {
+      kind.textContent = '整文件 · 这一步没有匹配到计划符号';
+      status.textContent = note;
+    }
+    if (result.truncated) status.textContent += ' · 文件较大，已截断';
     previewRender();
   } catch (error) {
     status.textContent = '请求失败：' + (error && error.message ? error.message : '网络错误');

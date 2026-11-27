@@ -125,7 +125,7 @@ class CodePreviewTest(unittest.TestCase):
         with self.model_settings(), mock.patch.object(
                 server.LLM, "chat", return_value=reply) as chat:
             status, first = self.post_preview({
-                "run_id": self.RUN_ID, "task_id": "T1", "step_index": 0})
+                "run_id": self.RUN_ID, "task_id": "T1", "step_index": 0, "generate": 1})
             status2, second = self.post_preview({
                 "run_id": self.RUN_ID, "task_id": "T1", "step_index": 0})
 
@@ -143,7 +143,7 @@ class CodePreviewTest(unittest.TestCase):
         with self.model_settings(), mock.patch.object(
                 server.LLM, "chat", return_value={"content": "", "finish": "length"}) as chat:
             status, body = self.post_preview({
-                "run_id": self.RUN_ID, "task_id": "T1", "step_index": 0})
+                "run_id": self.RUN_ID, "task_id": "T1", "step_index": 0, "generate": 1})
 
         self.assertEqual(status, 502)
         self.assertFalse(body["ok"])
@@ -153,7 +153,7 @@ class CodePreviewTest(unittest.TestCase):
     def test_missing_model_config_is_actionable(self):
         with mock.patch.dict(server.SETTINGS.data, {"base_url": "", "api_key": ""}):
             status, body = self.post_preview({
-                "run_id": self.RUN_ID, "task_id": "T1", "step_index": 0})
+                "run_id": self.RUN_ID, "task_id": "T1", "step_index": 0, "generate": 1})
 
         self.assertEqual(status, 400)
         self.assertIn("模型", body["message"])
@@ -212,7 +212,8 @@ class CodePreviewTest(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIn("Auth", names)
         self.assertIn("login", names)
-        self.assertEqual(body["granularity"], "symbol")
+        self.assertEqual(body["granularity"], "file")   # 该步骤没有计划符号，整份返回
+        self.assertIsNone(body["slice"])
         self.assertEqual(body["strategy"], "indent")
 
     def test_splits_brace_language(self):
@@ -233,6 +234,75 @@ class CodePreviewTest(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(body["symbols"], [])
         self.assertEqual(body["granularity"], "file")
+
+
+    def test_step_returns_only_its_own_symbol(self):
+        self.write_file("src/login.py",
+                        "class User:\n    pass\n\n\nclass Order:\n    pass\n")
+        server.ENGINE.wf["tasks"][0]["steps"][0]["symbols"] = ["class User"]
+        status, body = self.post_preview({
+            "run_id": self.RUN_ID, "task_id": "T1", "step_index": 0})
+
+        self.assertEqual(status, 200)
+        self.assertIn("class User", body["code"])
+        self.assertNotIn("class Order", body["code"])
+        self.assertEqual(body["granularity"], "symbol")
+        self.assertEqual(body["slice"]["start"], 1)
+        self.assertEqual(body["slice"]["end"], 2)
+        self.assertIn("User", body["slice"]["names"])
+
+    def test_whole_flag_returns_full_file(self):
+        self.write_file("src/login.py",
+                        "class User:\n    pass\n\n\nclass Order:\n    pass\n")
+        server.ENGINE.wf["tasks"][0]["steps"][0]["symbols"] = ["class User"]
+        status, body = self.post_preview({
+            "run_id": self.RUN_ID, "task_id": "T1", "step_index": 0, "whole": 1})
+
+        self.assertEqual(status, 200)
+        self.assertIn("class User", body["code"])
+        self.assertIn("class Order", body["code"])
+        self.assertEqual(body["granularity"], "file")
+        self.assertIsNone(body["slice"])
+
+
+    def test_whole_can_switch_to_any_task_file(self):
+        self.write_file("src/login.py", "# login\n")
+        self.write_file("src/user.py", "# user store\n")
+        server.ENGINE.wf["tasks"][0]["files"] = ["src/login.py", "src/user.py"]
+        status, body = self.post_preview({
+            "run_id": self.RUN_ID, "task_id": "T1", "step_index": 0,
+            "whole": 1, "path": "src/user.py"})
+
+        self.assertEqual(status, 200)
+        self.assertIn("user store", body["code"])
+        self.assertEqual(body["path"], "src/user.py")
+        self.assertEqual(body["task_files"], ["src/login.py", "src/user.py"])
+
+    def test_whole_rejects_file_not_in_task(self):
+        self.write_file("src/login.py", "# login\n")
+        outside = os.path.join(self.ws_dir, "src", "other.py")
+        with open(outside, "w", encoding="utf-8") as f:
+            f.write("# other\n")
+        with mock.patch.object(server.LLM, "chat") as chat:
+            status, body = self.post_preview({
+                "run_id": self.RUN_ID, "task_id": "T1", "step_index": 0,
+                "whole": 1, "path": "src/other.py"})
+
+        self.assertEqual(status, 400)
+        self.assertIn("关联的文件", body["message"])
+        chat.assert_not_called()
+
+
+    def test_missing_file_does_not_call_model_by_default(self):
+        with mock.patch.object(server.LLM, "chat") as chat:
+            status, body = self.post_preview({
+                "run_id": self.RUN_ID, "task_id": "T1", "step_index": 0})
+
+        self.assertEqual(status, 404)
+        self.assertTrue(body["missing"])
+        self.assertIn("模拟运行不写盘", body["message"])
+        self.assertEqual(body["task_files"], ["src/login.py"])
+        chat.assert_not_called()
 
 
 if __name__ == "__main__":
