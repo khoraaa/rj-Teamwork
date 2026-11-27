@@ -150,6 +150,15 @@ def main():
         check(not missing, "每条任务都有 做什么 / 怎么做 / 落点或步骤（缺：%s）" % (missing[:3] or "无"))
         no_steps = [t["id"] for t in tasks if len(t.get("steps") or []) < 2]
         check(not no_steps, "每条任务至少 2 个子步骤（缺：%s）" % (no_steps[:3] or "无"))
+        rich = [s for t in tasks if t.get("kind") == "implementation"
+                for s in (t.get("steps") or []) if s.get("file") and s.get("symbols") and s.get("assertion")]
+        check(bool(rich), "实现类子步骤带 落点文件 / 产出符号 / 验收断言（%d 条）" % len(rich))
+        stray = [(t["id"], s.get("file")) for t in tasks for s in (t.get("steps") or [])
+                 if s.get("file") and s["file"] not in (t.get("files") or [])]
+        check(not stray, "子步骤的落点文件都在任务的 files 里（越界：%s）" % (stray[:2] or "无"))
+        flat = [s for t in tasks for s in (t.get("steps") or [])]
+        check(all("title" in s for s in flat) and all(int(s.get("est_lines") or 0) >= 0 for s in flat),
+              "子步骤结构稳定：标题必填、行数是正整数")
         no_acc = [t["id"] for t in tasks if not (t.get("acceptance") or [])]
         check(not no_acc, "每条任务都有验收条款（缺：%s）" % (no_acc[:3] or "无"))
         mods_covered = {t.get("module_id") for t in tasks if t.get("module_id")}

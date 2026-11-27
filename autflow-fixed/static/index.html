@@ -202,6 +202,11 @@
       aria-label="关闭代码预览">×</button>
   </div>
   <div class="code-preview-status" id="stepCodeStatus" role="status"></div>
+  <div class="code-preview-files" id="stepCodeFiles" hidden></div>
+  <div class="code-preview-tools">
+    <span class="code-preview-kind" id="stepCodeKind"></span>
+    <button class="btn sm ghost" type="button" id="stepCodeGenerate" onclick="previewGenerateNow()" hidden>生成一次预览</button>
+  </div>
   <pre class="code-preview-body" id="stepCodeBody"></pre>
 </dialog>
 

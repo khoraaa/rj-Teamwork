@@ -1358,10 +1358,23 @@ function taskBlock(n) {
     ${(t.files || []).length ? `<div class="section-title">落点文件</div>
       <div class="chips">${t.files.map(f => `<span class="chip file">${esc(f)}</span>`).join('')}</div>` : ''}
     ${(t.steps || []).length ? `<div class="section-title">子步骤（${t.steps.length}）</div>
-      <ol class="step-list">${t.steps.map((st, i) => `<li><div class="step-copy"><b>${esc(st.title || '')}</b>${
-        st.how ? '<span>' + esc(st.how) + '</span>' : ''}</div>
-        <button class="btn sm ghost step-preview-btn" onclick="previewStepCode('${esc(t.id)}', ${i})"
-          ${!(t.files || []).length ? 'disabled title="此任务未关联目标文件"' : 'title="查看本次运行已生成的真实代码（只读）"'}>查看代码</button></li>`).join('')}</ol>` : ''}
+      <div class="insp-hint">点任意一步，只看这一步的代码；完整文件用下面的按钮。</div>
+      <ol class="step-list">${t.steps.map((st, i) => {
+        const meta = [];
+        if ((st.symbols || []).length) meta.push('产出 ' + st.symbols.join('、'));
+        if (st.assertion) meta.push('验收：' + st.assertion);
+        if (st.est_lines) meta.push('~' + st.est_lines + ' 行');
+        return `<li class="step-item" onclick="previewStepCode('${esc(t.id)}', ${i})"
+          title="${esc(st.file || '')}">
+          <div class="step-copy"><b>${esc(st.title || '')}</b>${
+            st.how ? '<span>' + esc(st.how) + '</span>' : ''}${
+            meta.length ? '<span class="step-meta">' + esc(meta.join(' · ')) + '</span>' : ''}</div>
+          <button type="button" class="btn sm ghost step-preview-btn"
+            onclick="event.stopPropagation(); previewStepCode('${esc(t.id)}', ${i})"
+            ${!(t.files || []).length && !st.file ? 'disabled title="此任务未关联目标文件"' : ''}>查看代码</button></li>`;
+      }).join('')}</ol>
+      <button type="button" class="btn sm ghost step-whole-btn"
+        onclick="previewWholeCode('${esc(t.id)}', 0)">查看完整代码</button>` : ''}
     <div class="section-title">验收条款</div>
     <div class="task-acceptance">${taskAcceptanceHTML(t)}</div>` : '';
   if (!isPmNode(n) && !t) return info;
@@ -1391,34 +1404,120 @@ function gotoTask(tid) {
   if (hit) selectNode(hit.id);
 }
 
-async function previewStepCode(taskId, stepIndex) {
+const codePreview = { code: '', path: '', taskId: '', stepIndex: 0, wholeMode: false };
+
+function previewStepOf(taskId, stepIndex) {
+  const task = ((app.def && app.def.tasks) || []).find(t => t.id === taskId);
+  const steps = (task && task.steps) || [];
+  return steps[stepIndex] || null;
+}
+
+function previewStepText(taskId, stepIndex) {
+  const step = previewStepOf(taskId, stepIndex);
+  if (!step) return '';
+  return step.title || step.how || '';
+}
+
+function previewRender() {
+  const body = $('#stepCodeBody');
+  if (body) body.textContent = codePreview.code || '';
+}
+
+function previewStepCode(taskId, stepIndex) {
+  return openStepCode(taskId, stepIndex, false, '');
+}
+
+function previewWholeCode(taskId, stepIndex) {
+  return openStepCode(taskId, stepIndex, true, '');
+}
+
+function previewPickFile(path) {
+  return openStepCode(codePreview.taskId, codePreview.stepIndex, true, path);
+}
+
+function previewGenerateNow() {
+  const p = codePreview.path || '';
+  return openStepCode(codePreview.taskId, codePreview.stepIndex, codePreview.wholeMode, p, true);
+}
+
+function previewFileTabs(files, active) {
+  const box = $('#stepCodeFiles');
+  if (!box) return;
+  if (!files || !files.length) {
+    box.hidden = true;
+    box.innerHTML = '';
+    return;
+  }
+  box.hidden = false;
+  box.innerHTML = files.map(f =>
+    `<button type="button" class="file-tab${f === active ? ' active' : ''}" data-file="${esc(f)}">${esc(f)}</button>`
+  ).join('');
+  box.querySelectorAll('button').forEach(btn => {
+    btn.onclick = () => previewPickFile(btn.dataset.file);
+  });
+}
+
+async function openStepCode(taskId, stepIndex, whole, wantedFile, generate) {
   const dialog = $('#stepCodeDialog');
   const path = $('#stepCodePath');
   const status = $('#stepCodeStatus');
-  const code = $('#stepCodeBody');
-  path.textContent = '正在确定目标文件…';
-  status.textContent = '正在读取本次运行的代码（没有落盘时会生成一次，之后走缓存）…';
-  code.textContent = '';
+  const kind = $('#stepCodeKind');
+  const title = $('#stepCodeTitle');
+  const body = $('#stepCodeBody');
+  const step = previewStepOf(taskId, stepIndex) || {};
+  codePreview.taskId = taskId;
+  codePreview.stepIndex = stepIndex;
+  codePreview.wholeMode = !!whole;
+  const genBtn = $('#stepCodeGenerate');
+  if (genBtn) genBtn.hidden = true;
+  title.textContent = whole ? '完整文件' : (step.title || '子步骤代码');
+  path.textContent = wantedFile || (whole ? '正在读取文件列表…' : '正在确定目标文件…');
+  status.textContent = whole ? '正在读取完整文件…' : '正在读取这一步的代码…';
+  kind.textContent = '';
+  body.textContent = '';
+  codePreview.code = '';
+  if (!whole) previewFileTabs([], '');
   if (!dialog.open) dialog.showModal();
   try {
-    const result = await api('/api/tasks/preview-code', {
+    const payload = {
       task_id: taskId, step_index: stepIndex,
-      run_id: (app.run && app.run.run_id) || ''
-    });
+      run_id: (app.run && app.run.run_id) || '', whole: whole ? 1 : 0
+    };
+    if (whole && wantedFile) payload.path = wantedFile;
+    if (generate) payload.generate = 1;
+    const result = await api('/api/tasks/preview-code', payload);
     if (!result.ok) {
       path.textContent = result.path || '代码不可用';
       status.textContent = result.message || '读取代码失败';
+      codePreview.path = result.path || '';
+      if (whole) previewFileTabs(result.task_files || [], result.path);
+      if (result.missing && genBtn) genBtn.hidden = false;
       return;
     }
+    codePreview.code = result.code || '';
     path.textContent = result.path;
+    if (whole) previewFileTabs(result.task_files || [], result.path);
+    else previewFileTabs([], '');
     const notes = {
       workspace: '来自本次运行的工作区 · 只读',
       cache: '本次查看生成的结果 · 已缓存，不再调模型',
       generated: '运行没有落盘，已按该子步骤生成一次并缓存 · 未执行、未参与测试'
     };
-    status.textContent = (notes[result.source] || notes.workspace)
-      + (result.truncated ? ' · 文件较大，已截断显示' : '');
-    code.textContent = result.code || '';
+    const note = notes[result.source] || notes.workspace;
+    const slice = result.slice || null;
+    const lines = codePreview.code.split('\n').length;
+    if (whole) {
+      kind.textContent = '整文件 · ' + lines + ' 行';
+      status.textContent = note;
+    } else if (slice) {
+      kind.textContent = '第 ' + slice.start + '–' + slice.end + ' 行 · ' + (slice.names || []).join('、');
+      status.textContent = note + ' · 只显示这一步的代码';
+    } else {
+      kind.textContent = '整文件 · 这一步没有匹配到计划符号';
+      status.textContent = note;
+    }
+    if (result.truncated) status.textContent += ' · 文件较大，已截断';
+    previewRender();
   } catch (error) {
     status.textContent = '请求失败：' + (error && error.message ? error.message : '网络错误');
   }
