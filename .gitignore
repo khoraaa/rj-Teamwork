@@ -1,0 +1,27 @@
+# ---- 本机密钥（绝不入库） ----
+autflow-fixed/data/settings.json
+*.env
+.env
+
+# ---- 运行态数据 / 生成物 ----
+autflow-fixed/data/run_state.json
+autflow-fixed/data/preview_cache/
+autflow-fixed/data/workspaces/
+_dsh-acl-report/
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# ---- Node ----
+node_modules/
+
+# ---- 编辑器 / 系统 ----
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# ---- 日志 ----
+*.log
