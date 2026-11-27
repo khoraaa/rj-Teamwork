@@ -1361,7 +1361,7 @@ function taskBlock(n) {
       <ol class="step-list">${t.steps.map((st, i) => `<li><div class="step-copy"><b>${esc(st.title || '')}</b>${
         st.how ? '<span>' + esc(st.how) + '</span>' : ''}</div>
         <button class="btn sm ghost step-preview-btn" onclick="previewStepCode('${esc(t.id)}', ${i})"
-          ${!(t.files || []).length ? 'disabled title="此任务未关联目标文件"' : 'title="生成代码预览，不保存到本机也不执行"'}>查看代码</button></li>`).join('')}</ol>` : ''}
+          ${!(t.files || []).length ? 'disabled title="此任务未关联目标文件"' : 'title="查看本次运行已生成的真实代码（只读）"'}>查看代码</button></li>`).join('')}</ol>` : ''}
     <div class="section-title">验收条款</div>
     <div class="task-acceptance">${taskAcceptanceHTML(t)}</div>` : '';
   if (!isPmNode(n) && !t) return info;
@@ -1397,20 +1397,27 @@ async function previewStepCode(taskId, stepIndex) {
   const status = $('#stepCodeStatus');
   const code = $('#stepCodeBody');
   path.textContent = '正在确定目标文件…';
-  status.textContent = '正在请求模型生成代码预览…';
+  status.textContent = '正在读取本次运行的代码（没有落盘时会生成一次，之后走缓存）…';
   code.textContent = '';
   if (!dialog.open) dialog.showModal();
   try {
     const result = await api('/api/tasks/preview-code', {
-      task_id: taskId, step_index: stepIndex
+      task_id: taskId, step_index: stepIndex,
+      run_id: (app.run && app.run.run_id) || ''
     });
     if (!result.ok) {
-      path.textContent = result.path || '代码预览不可用';
-      status.textContent = result.message || '代码预览生成失败';
+      path.textContent = result.path || '代码不可用';
+      status.textContent = result.message || '读取代码失败';
       return;
     }
     path.textContent = result.path;
-    status.textContent = '仅供预览 · 未保存到本机 · 未执行';
+    const notes = {
+      workspace: '来自本次运行的工作区 · 只读',
+      cache: '本次查看生成的结果 · 已缓存，不再调模型',
+      generated: '运行没有落盘，已按该子步骤生成一次并缓存 · 未执行、未参与测试'
+    };
+    status.textContent = (notes[result.source] || notes.workspace)
+      + (result.truncated ? ' · 文件较大，已截断显示' : '');
     code.textContent = result.code || '';
   } catch (error) {
     status.textContent = '请求失败：' + (error && error.message ? error.message : '网络错误');
@@ -2791,7 +2798,7 @@ async function exitHistory() {
 
 /* ================================================================ 模型接入
  * 密钥只在服务端保存（data/settings.json），前端只拿到掩码提示；
- * 保存后 /api/state 的 settings.active 表示模型可用于讨论与代码预览；运行仍为模拟。
+ * 保存后 /api/state 的 settings.active 表示模型可用于讨论与真实执行；模拟运行不落盘代码。
  */
 const PRESET_FALLBACK = [
   { id: 'openai', name: 'OpenAI', base_url: 'https://api.openai.com/v1', model: 'gpt-4o-mini' },
@@ -2852,7 +2859,7 @@ function fillSettings(s) {
   $('#setModel').value = s.model || '';
   $('#setKey').value = '';
   $('#setKeyHint').textContent = s.has_key
-    ? ('已保存 ' + (s.key_hint || '••••')) : '未保存（用于模型代码预览）';
+    ? ('已保存 ' + (s.key_hint || '••••')) : '未保存（用于 AI 讨论与真实执行）';
   $('#setTemp').value = s.temperature != null ? s.temperature : 0.2;
   $('#setSteps').value = s.max_steps != null ? s.max_steps : 14;
   $('#setMaxTokens').value = s.max_tokens != null ? s.max_tokens : 4096;
@@ -2882,7 +2889,7 @@ function onModeToggle() {
   if ($('#tglUseLLM').checked && !(app.settings && app.settings.has_key)
       && !$('#setKey').value.trim()) {
     $('#setKey').focus();
-    toast('先填入 API Key（或选择本地 Ollama）再启用代码预览', true);
+    toast('先填入 API Key（或选择本地 Ollama）再启用模型', true);
   }
 }
 
@@ -3049,7 +3056,7 @@ async function saveSettings() {
   const key = $('#setKey').value.trim();
   if (key) payload.api_key = key;
   if (payload.mode === 'llm' && !key && !(app.settings && app.settings.has_key)) {
-    toast('启用模型代码预览需要 API Key', true);
+    toast('启用模型需要 API Key', true);
     $('#setKey').focus();
     return;
   }
@@ -3061,9 +3068,9 @@ async function saveSettings() {
     fillSettings(r.settings);
     renderModeChip();
     note.textContent = r.settings.active
-      ? '模型已就绪 · 可用于讨论和子步骤代码预览；工作流仍只运行模拟流程'
-      : '已保存 · 模型尚不可用于预览；工作流仍为模拟模式';
-    toast(r.settings.active ? '模型已就绪，可生成代码预览' : '配置已保存');
+      ? '模型已就绪 · 可用于讨论与真实执行；模拟运行不会产生代码文件'
+      : '已保存 · 模型尚未启用；工作流仍为模拟模式';
+    toast(r.settings.active ? '模型已就绪' : '配置已保存');
   } catch (e) {
     note.textContent = '保存失败：' + (e && e.message ? e.message : e);
   } finally {
@@ -3111,8 +3118,8 @@ function renderModeChip() {
   else { chip.textContent = '⚙ 模型 · 模拟'; chip.className = 'mode-chip btn sm'; }
   chip.title = s.active
     ? ('模型已配置：' + (s.provider || '') + ' / ' + (s.model || '')
-       + ' — 可用于 AI 讨论与代码预览；工作流运行始终为模拟；点此修改配置')
-    : '工作流运行始终为模拟；配置模型后可使用 AI 讨论和子步骤代码预览';
+       + ' — 可用于 AI 讨论与真实执行；模拟运行不落盘代码；点此修改配置')
+    : '工作流默认模拟运行；配置模型后可启用 AI 讨论与真实执行';
   syncDiscussUI();
 }
 

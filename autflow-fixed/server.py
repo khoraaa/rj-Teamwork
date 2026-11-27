@@ -40,6 +40,8 @@ SPEC_PATH = os.path.join(DATA_DIR, "specs.json")
 SETTINGS_PATH = os.path.join(DATA_DIR, "settings.json")
 # 每次运行一个隔离工作区：模型在这里真的写代码、真的跑测试
 WORKSPACES_DIR = os.path.join(DATA_DIR, "workspaces")
+# 「查看代码」的按需生成缓存：模拟运行没有落盘文件时生成一次存这里，之后只读不调模型
+PREVIEW_CACHE_DIR = os.path.join(DATA_DIR, "preview_cache")
 # 默认只跑模拟工作流。真实代码写盘/命令执行必须通过环境变量显式启用。
 LOCAL_CODE_EXECUTION_ENABLED = os.environ.get("AUTFLOW_ENABLE_LOCAL_CODE_EXECUTION") == "1"
 
@@ -1340,32 +1342,71 @@ def _step_target_file(task, step, step_index):
     return ""
 
 
-def _generate_step_code(task, step, path, ai_id=None):
-    """生成仅用于界面预览的源代码；不创建文件，也不执行生成内容。"""
-    config = SETTINGS.spec(ai_id) if ai_id else SETTINGS.data
-    if not (config.get("base_url") and config.get("api_key")):
-        raise llm_client.LLMNotConfigured("代码预览需要先配置可用的模型端点与 API Key")
+def _workspace_path(ws_dir, rel):
+    """把任务里的相对路径解析到运行工作区内；越界或路径非法时返回空串（不判断文件是否存在）。"""
+    if not ws_dir or not rel:
+        return ""
+    root = os.path.realpath(ws_dir)
+    parts = [p for p in str(rel).replace("\\", "/").split("/") if p not in ("", ".")]
+    if not parts or any(p == ".." for p in parts) or re.match(r"^[A-Za-z]:", parts[0]):
+        return ""
+    target = os.path.realpath(os.path.join(root, *parts))
+    if target != root and not target.startswith(root + os.sep):
+        return ""
+    return target
+
+
+def _preview_cache_file(run_id, task_id, step_index, target):
+    """一条子步骤的生成结果缓存路径：同一次运行、同一个子步骤只生成一次。"""
+    key = "%s__%s__%s" % (task_id, step_index, str(target).replace("/", "_"))
+    key = re.sub(r"[^\w.\-]", "_", key)
+    run_key = re.sub(r"[^\w.\-]", "_", str(run_id or "draft"))
+    return os.path.join(PREVIEW_CACHE_DIR, run_key, key)
+
+
+def _generate_step_code(task, step, target, ai_id=None):
+    """模拟运行没有落盘文件时，按任务+子步骤让模型生成一次文件内容。"""
+    conf = SETTINGS.spec(ai_id) if ai_id else SETTINGS.data
+    if not (conf.get("base_url") and conf.get("api_key")):
+        raise llm_client.LLMNotConfigured(
+            "查看代码需要先在页面右上角「模型」配好 base_url 与 API Key，然后重新点一次")
+    doing = step.get("what") or step.get("title") or ""
+    how = step.get("how") or ""
+    done = step.get("done_when") or ""
+    acceptance = "；".join(str(a) for a in (task.get("acceptance") or [])[:4])
     messages = [
-        {"role": "system", "content":
-         "你是代码预览生成器。根据给定任务与子步骤，生成目标文件的完整源代码。"
-         "只返回代码，不要 Markdown 代码围栏、解释、TODO 或省略号。"
-         "不要调用工具，不要创建文件，不要执行任何命令。"},
+        {"role": "system", "content": "你是资深工程师。只输出目标文件的完整源码，"
+                                      "不要解释、不要 Markdown 围栏。"},
         {"role": "user", "content":
-         "目标文件：%s\n任务：%s\n阶段：%s\n做什么：%s\n怎么做：%s\n"
-         "验收标准：\n%s\n\n子步骤：%s\n子步骤说明：%s\n\n"
-         "请输出这个子步骤对应的完整、可读、尽量可运行的文件内容。"
-         % (path, task.get("title") or "", task.get("phase") or "",
-            task.get("what") or "", task.get("how") or "",
-            "\n".join("- " + str(x) for x in (task.get("acceptance") or [])[:8]) or "无",
-            step.get("title") or "", step.get("how") or "")},
+            "目标文件：%s\n任务：%s\n这一步：%s\n怎么做：%s\n验收：%s\n完成标准：%s\n\n"
+            "请给出可直接写入 %s 的完整代码。"
+            % (target, task.get("title") or "", doing, how, acceptance, done, target)},
     ]
-    reply = LLM.chat(messages, timeout=90, temperature=0.2, max_tokens=3000, ai_id=ai_id)
-    code = (reply.get("content") or "").strip()
-    code = re.sub(r"^```[^\r\n]*\r?\n", "", code)
-    code = re.sub(r"\r?\n```$", "", code).strip()
-    if not code:
-        raise llm_client.LLMError("E-FORMAT", "模型没有返回代码内容")
-    return code
+    finish = ""
+    saw_reasoning = False
+    for attempt in range(2):
+        if attempt:
+            # 第一次空返回时用更短的提示词再试一次：有的模型会因为上下文太长而不吐内容
+            messages = [
+                {"role": "system", "content": "只输出完整源码，不要任何解释。"},
+                {"role": "user", "content": "文件：%s\n要求：%s\n%s\n直接输出文件内容。"
+                                            % (target, doing, how)},
+            ]
+        reply = LLM.chat(messages, timeout=120, temperature=0.2,
+                         max_tokens=8000, ai_id=ai_id)
+        finish = reply.get("finish") or ""
+        if reply.get("reasoning"):
+            saw_reasoning = True
+        code = (reply.get("content") or "").strip()
+        code = re.sub(r"^```[a-zA-Z0-9_+-]*\s*\n", "", code)
+        code = re.sub(r"\n```\s*$", "", code).strip()
+        if code:
+            return code
+    raise llm_client.LLMError(
+        "E-FORMAT", "模型返回了空内容（finish_reason=%s）%s。可以把「模型」里的 max_tokens 调大，"
+                    "或换一个非思考模型再点一次。"
+        % (finish or "unknown",
+           "，只返回了思考内容、没有正文" if saw_reasoning else ""))
 
 
 def decompose_spec(spec):
@@ -3416,9 +3457,20 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"ok": False, "message": "子步骤编号无效"}, 400)
             if not task_id or step_index < 0:
                 return self._json({"ok": False, "message": "任务或子步骤编号无效"}, 400)
+            run_id = str(body.get("run_id") or "")
             with ENGINE.lock:
-                definition = (ENGINE.run.get("definition")
-                              if ENGINE.run.get("status") != "IDLE" else ENGINE.wf)
+                live = ENGINE.run if isinstance(ENGINE.run, dict) else {}
+                if not run_id or run_id == live.get("run_id"):
+                    run_id = live.get("run_id") or ""
+                    definition = (live.get("definition")
+                                  if live.get("status") != "IDLE" else ENGINE.wf)
+                    ws_dir = live.get("workspace") or (
+                        os.path.join(WORKSPACES_DIR, run_id) if run_id
+                        else os.path.join(WORKSPACES_DIR, "_draft"))
+                else:
+                    snap = ARCHIVE.get(run_id) or {}
+                    definition = snap.get("definition") or ENGINE.wf
+                    ws_dir = os.path.join(WORKSPACES_DIR, run_id)
                 definition = _clone(definition or ENGINE.wf)
             task = next((t for t in (definition.get("tasks") or [])
                          if str(t.get("id")) == task_id), None)
@@ -3433,18 +3485,60 @@ class Handler(BaseHTTPRequestHandler):
             target = _step_target_file(task, step, step_index)
             if not target:
                 return self._json({"ok": False, "message": "该子步骤没有关联的目标文件"}, 400)
+            file_path = _workspace_path(ws_dir, target)
+            if not file_path:
+                return self._json({"ok": False, "path": target,
+                                   "message": "路径不在运行工作区内：%s" % target}, 400)
+            if os.path.isfile(file_path):
+                try:
+                    with open(file_path, "rb") as f:
+                        data = f.read(200001)
+                except OSError as exc:
+                    return self._json({"ok": False, "path": target,
+                                       "message": "读取工作区文件失败：%s" % exc}, 500)
+                return self._json({"ok": True, "source": "workspace", "run_id": run_id,
+                                   "task_id": task_id, "step_index": step_index,
+                                   "path": target,
+                                   "code": data[:200000].decode("utf-8", "replace"),
+                                   "truncated": len(data) > 200000,
+                                   "saved": False, "executed": False})
+            cache_path = _preview_cache_file(run_id, task_id, step_index, target)
+            if os.path.isfile(cache_path):
+                try:
+                    with open(cache_path, "rb") as f:
+                        data = f.read(200001)
+                except OSError as exc:
+                    return self._json({"ok": False, "path": target,
+                                       "message": "读取生成缓存失败：%s" % exc}, 500)
+                return self._json({"ok": True, "source": "cache", "run_id": run_id,
+                                   "task_id": task_id, "step_index": step_index,
+                                   "path": target,
+                                   "code": data[:200000].decode("utf-8", "replace"),
+                                   "truncated": len(data) > 200000,
+                                   "cached": True, "saved": False, "executed": False})
+            # 模拟运行没写文件：按需生成一次并缓存，之后点同一子步骤直接读缓存，不再调模型
             node = next((n for n in (definition.get("nodes") or [])
-                         if n.get("task_id") == task_id), None)
-            ai_id = ENGINE._ai_for(node) if node else (task.get("ai") or "")
+                         if str(n.get("task_id")) == task_id), None)
+            ai_id = ENGINE._ai_for(node) if node else ""
             try:
                 code = _generate_step_code(task, step, target, ai_id or None)
+            except llm_client.LLMNotConfigured as exc:
+                return self._json({"ok": False, "path": target, "message": str(exc)}, 400)
             except llm_client.LLMError as exc:
-                status = 400 if isinstance(exc, llm_client.LLMNotConfigured) else 502
-                return self._json({"ok": False, "code": getattr(exc, "code", "E-AGENT"),
-                                   "message": str(exc)}, status)
-            return self._json({"ok": True, "task_id": task_id, "step_index": step_index,
-                               "path": target, "code": code,
-                               "saved": False, "executed": False})
+                return self._json({"ok": False, "path": target,
+                                   "code": getattr(exc, "code", "E-AGENT"),
+                                   "message": str(exc)}, 502)
+            cached = True
+            try:
+                os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+                with open(cache_path, "w", encoding="utf-8") as f:
+                    f.write(code)
+            except OSError:
+                cached = False
+            return self._json({"ok": True, "source": "generated", "run_id": run_id,
+                               "task_id": task_id, "step_index": step_index,
+                               "path": target, "code": code, "truncated": False,
+                               "cached": cached, "saved": False, "executed": False})
         if path == "/api/ais":
             res = SETTINGS.upsert_ai(body or {})
             return self._json({"ok": True, "ai": res, "settings": SETTINGS.public()})

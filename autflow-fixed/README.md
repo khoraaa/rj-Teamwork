@@ -263,10 +263,10 @@ node tools/browser_e2e.js
 
 \---
 
-## 2.6 模型接入与子步骤代码预览
+## 2.6 模型接入与子步骤代码查看
 
 默认工作流始终是**确定性模拟**（运行过程不调用代码执行器、不写文件、不运行生成代码）。
-如需 AI 讨论或子步骤代码预览，点顶栏 **「⚙ 模型」** 配置模型；模型入口和状态徽标已合并为一个控件：
+如需 AI 讨论或真实执行，点顶栏 **「⚙ 模型」** 配置模型；模型入口和状态徽标已合并为一个控件：
 
 |字段|说明|
 |-|-|
@@ -275,7 +275,7 @@ node tools/browser_e2e.js
 |模型名|如 `deepseek-chat`、`gpt-4o-mini`、`claude-sonnet-4-5`|
 |API Key|只存在本机 `data/settings.json`；接口只回掩码（`sk-t…cdef`），前端从不持有明文。**「彻底清除」**会真的把这个字段从磁盘删掉，并写 `ignore_env_key`，重启后不会复活（若密钥来自 `AUTFLOW_LLM_API_KEY`，面板会标 `key_source=env`，清除后同样不再注入）|
 |temperature / max_tokens / 超时 / 工具步数|模型请求参数；工具步数用于讨论等带工具的流程|
-|启用模型代码预览|勾选并保存后，可在任务详情中请求模型生成子步骤代码预览|
+|启用模型|勾选并保存后，AI 讨论与真实执行走这个端点；查看代码只在“工作区没有落盘文件”时需要模型生成一次，之后读缓存|
 
 模型配置可用状态由服务端判定：**有 base_url + key 且 mode=llm** 才算可用；
 `/api/state` 里的 `settings.active` 就是它。工作流运行默认始终是模拟模式，不会在本机创建代码工作区或执行生成的代码。
@@ -284,18 +284,26 @@ node tools/browser_e2e.js
 Qwen 做评审），每个有自己的 Base URL / 模型 / 密钥，互不覆盖。登记后可以：
 
 * 给五个讨论角色分别指派 AI（见 2.8），讨论时不同角色真的走不同模型；
-* 给 8 个任务分组分别指派 AI（见 2.9），作为代码预览的模型选择；
+* 给 8 个任务分组分别指派 AI（见 2.9），作为真实执行时的模型选择；
 * 在节点详情里给单个节点再指定 AI（优先级：节点 > 分组 > 默认）；
 * 每个接入点单独「测试」，用的是**它自己的**端点与密钥。
 
-### 子步骤代码预览（不落盘、不执行）
+### 子步骤代码查看（优先读落盘文件，缺失时生成一次并缓存）
 
-在任务详情中点子步骤旁的 **查看代码**，服务端会根据该任务、子步骤和关联文件路径向已配置模型请求代码，
-并在弹窗中显示返回文本。此流程不调用带工具的执行器，不创建工作区、不写文件，也不运行生成的代码；
-模型未配置或任务没有关联目标文件时会显示明确提示。模拟工作流不会登记虚假的运行产物。
+在任务详情中点子步骤旁的 **查看代码**，服务端按 `run_id` 定位这次运行：
 
-旧版真实执行器仍保留给明确的开发/集成测试场景。只有在启动服务前显式设置
-`AUTFLOW_ENABLE_LOCAL_CODE_EXECUTION=1` 才会启用本机工作区写入和命令执行；日常使用不要设置此变量。
+1. 工作区里已经有这个文件（真实执行写过）→ 原样读出，`source=workspace`，**不调用模型**；
+2. 没有文件（模拟运行、还没跑到该步骤）→ 按任务 + 子步骤让当前模型生成一次，
+   写到 `data/preview_cache/<run_id>/`，`source=generated`，弹窗会标注“未执行、未参与测试”；
+3. 同一子步骤再次点击 → 直接读缓存，`source=cache`，不再调模型。
+
+生成失败（模型返回空内容）会返回 502，并在消息里带上 `finish_reason`，便于判断是不是
+`max_tokens` 太小；没配模型则返回 400，提示先到「模型」面板配置。越界路径（`..`、盘符）
+一律 400，且不会触发生成。任何情况都**不会写进工作区、不会执行代码**。
+
+运行历史（`/api/runs/{run_id}`）回看时同样可用，读的是那次运行的目录与缓存。
+真实代码只出现在显式开启本机执行的运行里：启动服务前设置 `AUTFLOW_ENABLE_LOCAL_CODE_EXECUTION=1`，
+`ToolAgent` 才会把代码写进 `data/workspaces/<run_id>/`；日常使用不要设置此变量。
 
 \---
 
@@ -400,7 +408,7 @@ Qwen 做评审），每个有自己的 Base URL / 模型 / 密钥，互不覆盖
 分组不只是好看：它还是**执行 AI 的默认指派单位**。`part_ais` 里给某个分组指定 AI 后，
 该组节点默认由这个 AI 执行；节点自己的 `ai` 优先级更高；都没指定才用全局默认。
 `plan_from_tasks` 把 `part` / `part_label` / `ai` 写进节点（`NODE_FIELDS` 里可查），
-代码预览时 `Engine._ai_for()` 按这个顺序解析并选择模型；本机真实执行仅在显式开发开关启用时使用 `ToolAgent`。
+真实执行时 `Engine._ai_for()` 按这个顺序解析并选择模型；本机真实执行仅在显式开发开关启用时使用 `ToolAgent`。
 
 ---
 
@@ -510,7 +518,7 @@ python tools/demo_matrix.py
 |POST|`/api/specs/{id}/decompose`|规格 → 任务清单 `tasks[]`（只读，不落库）|
 |POST|`/api/specs/{id}/preview`|规格 → 任务清单 → DAG 预演（只读，**不落库**），返回 `definition` / `tasks` / `graph`，供「分解预览」直接画在画布上|
 |POST|`/api/specs/{id}/plan`|规格 → 任务清单 → DAG，并落库为当前草稿（`{"template":"default"}`），返回 `draft` / `tasks` / `trace` / `stats`|
-|POST|`/api/tasks/preview-code`|按 `task_id` / `step_index` 生成代码文本预览，不保存文件、不执行代码|
+|POST|`/api/tasks/preview-code`|按 `run_id` / `task_id` / `step_index` 返回该子步骤代码：优先读本次运行工作区，缺失时生成一次并缓存到 `data/preview_cache/`；响应含 `source`（workspace/cache/generated）；不执行|
 |GET|`/api/runs`|运行历史列表（最近 20 条摘要）|
 |GET|`/api/runs/{run_id}`|单次运行详情（定义快照 + 节点 + 事件），供历史回看|
 |GET|`/api/runs/{run_id}/files`|该次运行工作区里的文件清单 + 节点登记的产物（`artifacts[]`，带字节数）|
@@ -558,7 +566,7 @@ python tools/demo_matrix.py
 | `python tools/executor_test.py` | 可替换执行器 / 超时重试 / 持续超时转人工 / 错误分类 / 取消 | 22 |
 | `python tools/agent_async_test.py` | 慢执行器不阻塞接口与调度（异步执行 / 超时 / 取消） | 14 |
 | `python tools/recovery_test.py` | 运行中杀进程 → 重启恢复（RECONCILING / UNCERTAIN）→ 核对后跑完归档 | 14 |
-| `python tools/code_preview_test.py` | 子步骤代码预览 API、目标文件校验、无工具调用、默认模拟执行、不创建工作区 | 3 |
+| `python tools/code_preview_test.py` | 子步骤代码查看 API：读工作区真实文件、缺失时生成一次并缓存、空内容带 finish_reason、越界路径拒绝且不生成、历史运行按自己的目录读、默认模拟执行 | 8 |
 | `python tools/llm_tool_test.py` | 模型配置与密钥掩码、规格文档导入（Markdown/JSON）、路径越界与命令白名单、测试输出解析、安全扫描、显式开发开关下的假模型写文件 / 跑测试 / 产物读取 | 69 |
 | `python tools/multi_agent_test.py` | 群体讨论：主持人按议题选人（非固定轮转）、人工插话被后续发言正面回应、五人表态与共识判定（block→加轮→达成）、没共识时 409 拦下、人工拍板后才生成、结束后插话续议、任务归一化（补字段/修依赖/断环/非法角色/越界路径）、乱答时明确失败、中止 | 78 |
 | `python tools/sdd_flow_test.py` | 真实 SDD 全流程：模块划分表（M1~M8 + 依赖列）、F 功能点挂验收、非功能表与「不做」进约束、文档里的接口/数据表变成独立任务（另一份极简需求则没有，证明不是固定模板）、分解字段齐全、模块依赖变任务先后且无环、编排后每个节点带任务内容、跑完后每个节点都有说明/产出/日志 | 54 |
