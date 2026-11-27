@@ -301,6 +301,15 @@ Qwen 做评审），每个有自己的 Base URL / 模型 / 密钥，互不覆盖
 `max_tokens` 太小；没配模型则返回 400，提示先到「模型」面板配置。越界路径（`..`、盘符）
 一律 400，且不会触发生成。任何情况都**不会写进工作区、不会执行代码**。
 
+弹窗按**符号**展示：响应额外带 `symbols[]`（名字 / 类型 / 起止行 / 置信度 / 父符号）、
+`strategy`（brace / indent / endkw / sql）和 `symbol_confidence`。左侧列出符号，点一个只看它，
+点「整文件」随时看全文；认不出符号时自动回落整文件，并标 `granularity=file`。
+
+切分器（`symbols.py`）是通用的，不写逐语言适配器：花括号（JS/Java/Go/C#/Rust…）、
+缩进（Python/YAML）、`end`（Ruby/Lua/Elixir）、分号（SQL），只用标准库，零第三方依赖。
+它承诺**结构准确**（块的起止落在真实声明边界上），不承诺语义准确；括号不闭合、文件过大
+（>512KB）或压缩成一行时会降级并标低置信度，而不是给一个看起来正确的错切分。
+
 运行历史（`/api/runs/{run_id}`）回看时同样可用，读的是那次运行的目录与缓存。
 真实代码只出现在显式开启本机执行的运行里：启动服务前设置 `AUTFLOW_ENABLE_LOCAL_CODE_EXECUTION=1`，
 `ToolAgent` 才会把代码写进 `data/workspaces/<run_id>/`；日常使用不要设置此变量。
@@ -518,7 +527,7 @@ python tools/demo_matrix.py
 |POST|`/api/specs/{id}/decompose`|规格 → 任务清单 `tasks[]`（只读，不落库）|
 |POST|`/api/specs/{id}/preview`|规格 → 任务清单 → DAG 预演（只读，**不落库**），返回 `definition` / `tasks` / `graph`，供「分解预览」直接画在画布上|
 |POST|`/api/specs/{id}/plan`|规格 → 任务清单 → DAG，并落库为当前草稿（`{"template":"default"}`），返回 `draft` / `tasks` / `trace` / `stats`|
-|POST|`/api/tasks/preview-code`|按 `run_id` / `task_id` / `step_index` 返回该子步骤代码：优先读本次运行工作区，缺失时生成一次并缓存到 `data/preview_cache/`；响应含 `source`（workspace/cache/generated）；不执行|
+|POST|`/api/tasks/preview-code`|按 `run_id` / `task_id` / `step_index` 返回该子步骤代码：优先读本次运行工作区，缺失时生成一次并缓存到 `data/preview_cache/`；响应含 `source`（workspace/cache/generated）、`code`、`symbols[]`（名字/类型/行范围/置信度）、`strategy`、`granularity`；不执行|
 |GET|`/api/runs`|运行历史列表（最近 20 条摘要）|
 |GET|`/api/runs/{run_id}`|单次运行详情（定义快照 + 节点 + 事件），供历史回看|
 |GET|`/api/runs/{run_id}/files`|该次运行工作区里的文件清单 + 节点登记的产物（`artifacts[]`，带字节数）|
@@ -566,7 +575,8 @@ python tools/demo_matrix.py
 | `python tools/executor_test.py` | 可替换执行器 / 超时重试 / 持续超时转人工 / 错误分类 / 取消 | 22 |
 | `python tools/agent_async_test.py` | 慢执行器不阻塞接口与调度（异步执行 / 超时 / 取消） | 14 |
 | `python tools/recovery_test.py` | 运行中杀进程 → 重启恢复（RECONCILING / UNCERTAIN）→ 核对后跑完归档 | 14 |
-| `python tools/code_preview_test.py` | 子步骤代码查看 API：读工作区真实文件、缺失时生成一次并缓存、空内容带 finish_reason、越界路径拒绝且不生成、历史运行按自己的目录读、默认模拟执行 | 8 |
+| `python tools/code_preview_test.py` | 子步骤代码查看 API：读工作区真实文件、缺失时生成一次并缓存、空内容带 finish_reason、越界路径拒绝且不生成、历史运行按自己的目录读、响应带符号索引（缩进/花括号两种策略）、无符号回落整文件、默认模拟执行 | 11 |
+| `python tools/split_symbols_test.py` | 通用符号切分器：Python 类/方法、JS 模板字符串、Java、Go、SQL、Ruby 的 end、括号不闭合降级、单行压缩文件、空文件、字符串里的括号不干扰 | 10 |
 | `python tools/llm_tool_test.py` | 模型配置与密钥掩码、规格文档导入（Markdown/JSON）、路径越界与命令白名单、测试输出解析、安全扫描、显式开发开关下的假模型写文件 / 跑测试 / 产物读取 | 69 |
 | `python tools/multi_agent_test.py` | 群体讨论：主持人按议题选人（非固定轮转）、人工插话被后续发言正面回应、五人表态与共识判定（block→加轮→达成）、没共识时 409 拦下、人工拍板后才生成、结束后插话续议、任务归一化（补字段/修依赖/断环/非法角色/越界路径）、乱答时明确失败、中止 | 78 |
 | `python tools/sdd_flow_test.py` | 真实 SDD 全流程：模块划分表（M1~M8 + 依赖列）、F 功能点挂验收、非功能表与「不做」进约束、文档里的接口/数据表变成独立任务（另一份极简需求则没有，证明不是固定模板）、分解字段齐全、模块依赖变任务先后且无环、编排后每个节点带任务内容、跑完后每个节点都有说明/产出/日志 | 54 |

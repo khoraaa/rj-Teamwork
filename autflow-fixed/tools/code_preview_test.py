@@ -53,6 +53,8 @@ class CodePreviewTest(unittest.TestCase):
             "edges": [],
         }
         self.ws_dir = os.path.join(server.WORKSPACES_DIR, self.RUN_ID)
+        if os.path.isdir(self.ws_dir):
+            shutil.rmtree(self.ws_dir)
         os.makedirs(self.ws_dir, exist_ok=True)
         server.ENGINE.run.update({
             "run_id": self.RUN_ID,
@@ -200,6 +202,37 @@ class CodePreviewTest(unittest.TestCase):
         server.ENGINE.cfg["agent"] = "llm"
         with mock.patch.object(server, "LOCAL_CODE_EXECUTION_ENABLED", False):
             self.assertEqual(server.ENGINE._agent_kind({"id": "N1", "role": "coder"}), "mock")
+
+    def test_symbols_index_is_returned(self):
+        self.write_file("src/login.py",
+                        "class Auth:\n    def login(self):\n        return True\n")
+        status, body = self.post_preview({
+            "run_id": self.RUN_ID, "task_id": "T1", "step_index": 0})
+        names = [s["name"] for s in body["symbols"]]
+        self.assertEqual(status, 200)
+        self.assertIn("Auth", names)
+        self.assertIn("login", names)
+        self.assertEqual(body["granularity"], "symbol")
+        self.assertEqual(body["strategy"], "indent")
+
+    def test_splits_brace_language(self):
+        self.write_file("src/login.py",
+                        "export class Auth {\n  login(u) {\n    return true;\n  }\n}\n")
+        status, body = self.post_preview({
+            "run_id": self.RUN_ID, "task_id": "T1", "step_index": 0})
+        names = [s["name"] for s in body["symbols"]]
+        self.assertEqual(status, 200)
+        self.assertIn("Auth", names)
+        self.assertIn("login", names)
+        self.assertEqual(body["strategy"], "brace")
+
+    def test_file_without_symbols_is_file_granularity(self):
+        self.write_file("src/login.py", "just a note, no declaration\n")
+        status, body = self.post_preview({
+            "run_id": self.RUN_ID, "task_id": "T1", "step_index": 0})
+        self.assertEqual(status, 200)
+        self.assertEqual(body["symbols"], [])
+        self.assertEqual(body["granularity"], "file")
 
 
 if __name__ == "__main__":

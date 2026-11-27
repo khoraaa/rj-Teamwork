@@ -1391,6 +1391,85 @@ function gotoTask(tid) {
   if (hit) selectNode(hit.id);
 }
 
+const codePreview = { code: '', path: '', symbols: [], active: -1, whole: false };
+
+function previewStepText(taskId, stepIndex) {
+  const task = ((app.def && app.def.tasks) || []).find(t => t.id === taskId);
+  const step = task && (task.steps || [])[stepIndex];
+  return step ? ((step.title || '') + ' ' + (step.how || '')) : '';
+}
+
+function previewGuessSymbol(text) {
+  const norm = s => String(s || '').toLowerCase().replace(/[_\-\s]/g, '');
+  const step = norm(text);
+  if (!step) return -1;
+  let best = -1;
+  let bestScore = 0;
+  codePreview.symbols.forEach((sym, i) => {
+    const name = norm(sym.name);
+    if (!name) return;
+    let score = 0;
+    if (step.includes(name)) score = name.length + 2;
+    else if (name.includes(step)) score = 1;
+    if (score > bestScore) { bestScore = score; best = i; }
+  });
+  return best;
+}
+
+function previewRender() {
+  const body = $('#stepCodeBody');
+  const list = $('#stepCodeSymbols');
+  const kind = $('#stepCodeKind');
+  const wholeBtn = $('#stepCodeWhole');
+  const lines = (codePreview.code || '').split('\n');
+  const syms = codePreview.symbols || [];
+  if (wholeBtn) {
+    wholeBtn.disabled = !syms.length;
+    wholeBtn.textContent = codePreview.whole ? '只看符号' : '整文件';
+  }
+  if (!syms.length) {
+    list.innerHTML = '<div class="code-symbol-empty">未识别到符号</div>';
+    kind.textContent = '整文件显示';
+    body.textContent = codePreview.code || '';
+    return;
+  }
+  const active = Math.max(0, codePreview.active);
+  const sym = syms[active];
+  if (codePreview.whole) {
+    body.textContent = codePreview.code || '';
+    kind.textContent = '整文件 · ' + lines.length + ' 行 · 共 ' + syms.length + ' 个符号';
+  } else {
+    const start = Math.max(1, sym.start || 1);
+    const end = Math.min(lines.length, sym.end || lines.length);
+    body.textContent = lines.slice(start - 1, end).join('\n');
+    kind.textContent = (sym.kind || 'symbol') + ' · 第 ' + start + '-' + end + ' 行'
+      + (sym.parent ? ' · 属于 ' + sym.parent : '');
+  }
+  list.innerHTML = syms.map((s, i) => `
+    <button type="button" class="code-symbol-item${i === active && !codePreview.whole ? ' active' : ''}"
+      onclick="previewPickSymbol(${i})" title="${esc(s.name)}">
+      <span class="code-symbol-kind">${esc(s.kind || '')}</span>
+      <span class="code-symbol-name">${esc(s.name)}</span>
+      <span class="code-symbol-range">${s.start}-${s.end}</span>
+    </button>`).join('');
+}
+
+function previewPickSymbol(index) {
+  const sym = codePreview.symbols[index];
+  if (!sym) return;
+  codePreview.active = index;
+  codePreview.whole = false;
+  previewRender();
+  const body = $('#stepCodeBody');
+  if (body) body.scrollTop = 0;
+}
+
+function previewShowWhole() {
+  if (!codePreview.symbols.length) return;
+  codePreview.whole = !codePreview.whole;
+  previewRender();
+}
+
 async function previewStepCode(taskId, stepIndex) {
   const dialog = $('#stepCodeDialog');
   const path = $('#stepCodePath');
@@ -1399,6 +1478,11 @@ async function previewStepCode(taskId, stepIndex) {
   path.textContent = '正在确定目标文件…';
   status.textContent = '正在读取本次运行的代码（没有落盘时会生成一次，之后走缓存）…';
   code.textContent = '';
+  $('#stepCodeSymbols').innerHTML = '';
+  codePreview.code = '';
+  codePreview.symbols = [];
+  codePreview.active = -1;
+  codePreview.whole = false;
   if (!dialog.open) dialog.showModal();
   try {
     const result = await api('/api/tasks/preview-code', {
@@ -1416,9 +1500,18 @@ async function previewStepCode(taskId, stepIndex) {
       cache: '本次查看生成的结果 · 已缓存，不再调模型',
       generated: '运行没有落盘，已按该子步骤生成一次并缓存 · 未执行、未参与测试'
     };
-    status.textContent = (notes[result.source] || notes.workspace)
+    codePreview.code = result.code || '';
+    codePreview.symbols = result.symbols || [];
+    codePreview.active = previewGuessSymbol(previewStepText(taskId, stepIndex));
+    codePreview.whole = !codePreview.symbols.length;
+    const conf = { high: '高置信', medium: '中置信', low: '低置信' }[result.symbol_confidence] || '';
+    const extra = result.symbols && result.symbols.length
+      ? ' · 识别到 ' + result.symbols.length + ' 个符号' + (conf ? '（' + conf + '）' : '')
+      : ' · 未识别到符号，按整文件显示';
+    status.textContent = (notes[result.source] || notes.workspace) + extra
+      + (result.symbol_note ? ' · ' + result.symbol_note : '')
       + (result.truncated ? ' · 文件较大，已截断显示' : '');
-    code.textContent = result.code || '';
+    previewRender();
   } catch (error) {
     status.textContent = '请求失败：' + (error && error.message ? error.message : '网络错误');
   }

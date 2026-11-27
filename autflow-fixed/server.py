@@ -48,6 +48,7 @@ LOCAL_CODE_EXECUTION_ENABLED = os.environ.get("AUTFLOW_ENABLE_LOCAL_CODE_EXECUTI
 sys.path.insert(0, BASE_DIR)
 import llm_client                                    # noqa: E402  模型接入与密钥管理
 import spec_import                                   # noqa: E402  设计规格文档解析
+import symbols as symbol_index                       # noqa: E402  通用符号切分
 import tool_agent                                    # noqa: E402  带工具的真实执行器
 import multi_agent                                   # noqa: E402  多智能体规划讨论
 
@@ -1362,6 +1363,25 @@ def _preview_cache_file(run_id, task_id, step_index, target):
     key = re.sub(r"[^\w.\-]", "_", key)
     run_key = re.sub(r"[^\w.\-]", "_", str(run_id or "draft"))
     return os.path.join(PREVIEW_CACHE_DIR, run_key, key)
+
+
+def _attach_symbols(payload, code, target):
+    """给代码预览响应挂上符号索引：前端据此按符号查看，同时保留整文件。"""
+    try:
+        info = symbol_index.split_symbols(code, target)
+        syms = info.get("symbols") or []
+        payload["symbols"] = syms
+        payload["strategy"] = info.get("strategy") or "none"
+        payload["symbol_confidence"] = info.get("confidence") or "none"
+        payload["symbol_note"] = info.get("note") or ""
+        payload["granularity"] = "symbol" if syms else "file"
+    except Exception as exc:            # 切分失败不能挡住看代码
+        payload["symbols"] = []
+        payload["strategy"] = "none"
+        payload["symbol_confidence"] = "none"
+        payload["symbol_note"] = "符号切分失败：%s" % exc
+        payload["granularity"] = "file"
+    return payload
 
 
 def _generate_step_code(task, step, target, ai_id=None):
@@ -3496,12 +3516,13 @@ class Handler(BaseHTTPRequestHandler):
                 except OSError as exc:
                     return self._json({"ok": False, "path": target,
                                        "message": "读取工作区文件失败：%s" % exc}, 500)
-                return self._json({"ok": True, "source": "workspace", "run_id": run_id,
-                                   "task_id": task_id, "step_index": step_index,
-                                   "path": target,
-                                   "code": data[:200000].decode("utf-8", "replace"),
-                                   "truncated": len(data) > 200000,
-                                   "saved": False, "executed": False})
+                code = data[:200000].decode("utf-8", "replace")
+                payload = {"ok": True, "source": "workspace", "run_id": run_id,
+                           "task_id": task_id, "step_index": step_index,
+                           "path": target, "code": code,
+                           "truncated": len(data) > 200000,
+                           "saved": False, "executed": False}
+                return self._json(_attach_symbols(payload, code, target))
             cache_path = _preview_cache_file(run_id, task_id, step_index, target)
             if os.path.isfile(cache_path):
                 try:
@@ -3510,12 +3531,13 @@ class Handler(BaseHTTPRequestHandler):
                 except OSError as exc:
                     return self._json({"ok": False, "path": target,
                                        "message": "读取生成缓存失败：%s" % exc}, 500)
-                return self._json({"ok": True, "source": "cache", "run_id": run_id,
-                                   "task_id": task_id, "step_index": step_index,
-                                   "path": target,
-                                   "code": data[:200000].decode("utf-8", "replace"),
-                                   "truncated": len(data) > 200000,
-                                   "cached": True, "saved": False, "executed": False})
+                code = data[:200000].decode("utf-8", "replace")
+                payload = {"ok": True, "source": "cache", "run_id": run_id,
+                           "task_id": task_id, "step_index": step_index,
+                           "path": target, "code": code,
+                           "truncated": len(data) > 200000,
+                           "cached": True, "saved": False, "executed": False}
+                return self._json(_attach_symbols(payload, code, target))
             # 模拟运行没写文件：按需生成一次并缓存，之后点同一子步骤直接读缓存，不再调模型
             node = next((n for n in (definition.get("nodes") or [])
                          if str(n.get("task_id")) == task_id), None)
@@ -3531,14 +3553,15 @@ class Handler(BaseHTTPRequestHandler):
             cached = True
             try:
                 os.makedirs(os.path.dirname(cache_path), exist_ok=True)
-                with open(cache_path, "w", encoding="utf-8") as f:
-                    f.write(code)
+                with open(cache_path, "wb") as f:
+                    f.write(code.encode("utf-8"))
             except OSError:
                 cached = False
-            return self._json({"ok": True, "source": "generated", "run_id": run_id,
-                               "task_id": task_id, "step_index": step_index,
-                               "path": target, "code": code, "truncated": False,
-                               "cached": cached, "saved": False, "executed": False})
+            payload = {"ok": True, "source": "generated", "run_id": run_id,
+                       "task_id": task_id, "step_index": step_index,
+                       "path": target, "code": code, "truncated": False,
+                       "cached": cached, "saved": False, "executed": False}
+            return self._json(_attach_symbols(payload, code, target))
         if path == "/api/ais":
             res = SETTINGS.upsert_ai(body or {})
             return self._json({"ok": True, "ai": res, "settings": SETTINGS.public()})

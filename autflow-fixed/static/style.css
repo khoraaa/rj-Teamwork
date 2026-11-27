@@ -705,8 +705,29 @@ table.att td{padding:3px 5px; color:#475569; border-bottom:1px solid #f1f5f9}
   overflow-wrap: anywhere;
 }
 .code-preview-status { padding: 8px 16px; color: #475569; font-size: 11.5px; }
+.code-preview-tools { display: flex; align-items: center; gap: 8px; padding: 0 16px 8px; }
+.code-preview-kind { color: #64748b; font-size: 11.5px; }
+.code-preview-grid { display: grid; grid-template-columns: 228px 1fr; min-height: 0; }
+.code-symbol-list {
+  border-right: 1px solid #1e293b; background: #f8fafc; overflow: auto;
+  max-height: calc(88vh - 150px); padding: 6px;
+}
+.code-symbol-item {
+  display: grid; grid-template-columns: 64px 1fr auto; gap: 6px; align-items: center;
+  width: 100%; text-align: left; border: 0; background: transparent; padding: 5px 7px;
+  border-radius: 6px; cursor: pointer; font-size: 11.5px; color: #334155;
+}
+.code-symbol-item:hover { background: #e2e8f0; }
+.code-symbol-item.active { background: #dbeafe; color: #1d4ed8; }
+.code-symbol-kind { color: #94a3b8; font-size: 10px; text-transform: uppercase; }
+.code-symbol-name {
+  font-family: ui-monospace, Consolas, monospace; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap;
+}
+.code-symbol-range { color: #94a3b8; font-size: 10px; }
+.code-symbol-empty { padding: 10px; color: #94a3b8; font-size: 11.5px; }
 .code-preview-body {
-  margin: 0; padding: 14px 16px; max-height: calc(88vh - 105px); overflow: auto;
+  margin: 0; padding: 14px 16px; max-height: calc(88vh - 150px); overflow: auto;
   background: #0f172a; color: #e2e8f0; font: 12px/1.6 ui-monospace, Consolas, monospace;
   white-space: pre; tab-size: 4;
 }
