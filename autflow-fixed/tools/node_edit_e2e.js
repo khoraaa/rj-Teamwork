@@ -255,7 +255,7 @@ async function main() {
         if (String(input).includes('/api/tasks/preview-code')) {
           return new Response(JSON.stringify({
             ok: true, path: 'src/preview.py', code: 'print("preview")',
-            saved: false, executed: false
+            source: 'generated', saved: false, executed: false
           }), { status: 200, headers: { 'Content-Type': 'application/json' } });
         }
         return window.__previewOriginalFetch(input, init);
@@ -268,7 +268,7 @@ async function main() {
       + " && document.querySelector('#stepCodeBody').textContent === 'print(\"preview\")'",
     10000, '代码预览弹窗显示返回内容');
     check((await text('#stepCodePath')) === 'src/preview.py', '弹窗显示目标文件路径');
-    check((await text('#stepCodeStatus')).indexOf('未保存到本机') >= 0
+    check((await text('#stepCodeStatus')).indexOf('没有落盘') >= 0
       && (await text('#stepCodeStatus')).indexOf('未执行') >= 0,
     '弹窗明确标注未保存、未执行');
     await evaluate(`(() => {

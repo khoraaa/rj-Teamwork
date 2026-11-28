@@ -791,11 +791,15 @@ function renderBanner() {
   if ((app.run.status === 'WAITING_HUMAN') && waiting) {
     b.hidden = false;
     if (waiting.type === 'approval') {
-      $('#bannerTitle').textContent = '上线审批 · 等待人工签署';
-      $('#bannerDesc').textContent = `${waiting.id} ${waiting.name}｜高风险节点，批准后流程继续，打回则保持挂起。`;
+      const target = waiting.return_to
+        ? ((app.nodeById[waiting.return_to] || {}).name || waiting.return_to)
+        : '';
+      $('#bannerTitle').textContent = `${waiting.name || '人工审核'} · 等待人工审核`;
+      $('#bannerDesc').textContent = `${waiting.id} ${waiting.name}｜审核通过后流程继续；` +
+        (target ? `退回修改后自动回到 ${waiting.return_to} ${target}。` : '未配置退回目标，退回后保持等待。');
       $('#bannerActions').innerHTML =
-        `<button class="btn primary" onclick="doApprove('${waiting.id}','approve')">批准上线</button>
-         <button class="btn danger" onclick="doApprove('${waiting.id}','reject')">打回修改</button>`;
+        `<button class="btn primary" onclick="doApprove('${waiting.id}','approve')">审核通过</button>
+         <button class="btn danger" onclick="doApprove('${waiting.id}','reject')">退回修改</button>`;
     } else {
       $('#bannerTitle').textContent = `节点 ${waiting.id} 需要人工处理`;
       $('#bannerDesc').textContent = `${waiting.name}｜${waiting.message || '重试次数耗尽'}`;
@@ -915,10 +919,10 @@ function renderDetail(force) {
   } else if (n.status === 'WAITING_HUMAN' && n.type === 'approval') {
     actions = `<input id="apComment" class="ap-input" value="${esc(app.apComment || '')}"
                       oninput="app.apComment = this.value"
-                      placeholder="审批意见（可选，会记入运行历史）">
+                      placeholder="审核意见（可选，会记入运行历史）">
                <div class="ap-btns">
-                 <button class="btn primary" onclick="doApprove('${n.id}','approve')">批准上线</button>
-                 <button class="btn danger" onclick="doApprove('${n.id}','reject')">打回修改</button>
+                 <button class="btn primary" onclick="doApprove('${n.id}','approve')">审核通过</button>
+                 <button class="btn danger" onclick="doApprove('${n.id}','reject')">退回修改</button>
                </div>`;
   } else if (n.status === 'WAITING_HUMAN' || n.status === 'FAILED') {
     actions = `<button class="btn warn" onclick="doRetry('${n.id}')">重试该节点</button>
@@ -934,13 +938,28 @@ function renderDetail(force) {
       <div class="errmsg">${esc(n.message || '未记录失败原因')}</div>
     </div>` : '';
 
+  const returnTarget = n.type === 'approval' && n.return_to
+    ? ((app.nodeById[n.return_to] || (app.def.nodes || []).find(x => x.id === n.return_to) || {}).name
+       || n.return_to)
+    : '';
   const ap = (n.type === 'approval' && n.output && n.output.decision) ? `
     <div class="section-title">人工操作结果</div>
     <div class="apbox ${n.output.decision === 'APPROVED' ? 'ok' : 'no'}">
-      <b>${n.output.decision === 'APPROVED' ? '已批准' : '已打回'}</b>
+      <b>${n.output.decision === 'APPROVED' ? '审核通过' : '已退回修改'}</b>
       · ${esc(n.output.approver || '人工')}${n.output.signed_at != null ? ' · ' + fmtDur(n.output.signed_at) : ''}
       <div class="ap-cmt">${esc(n.output.comment || '（无意见）')}</div>
     </div>` : '';
+  const approvalHistory = n.type === 'approval' ? (n.approval_history || []) : [];
+  const apHistory = approvalHistory.length ? `
+    <div class="section-title">审核记录（${approvalHistory.length}）</div>
+    <table class="att">
+      <thead><tr><th>决定</th><th>时间</th><th>退回目标</th><th>意见</th></tr></thead>
+      <tbody>${approvalHistory.map(x => `<tr>
+        <td>${x.decision === 'APPROVED' ? '通过' : '退回'}</td>
+        <td>${x.at != null ? fmtDur(x.at) : '—'}</td>
+        <td class="mono">${esc(x.return_to || '—')}${x.return_to_name ? ' · ' + esc(x.return_to_name) : ''}</td>
+        <td>${esc(x.comment || '—')}</td></tr>`).join('')}</tbody>
+    </table>` : '';
 
   const attTable = attempts ? `
     <div class="section-title">尝试记录</div>
@@ -975,12 +994,20 @@ function renderDetail(force) {
     ${errBlock}
     <div class="section-title">质量门</div>
     <div class="chips">${gateChips(n)}</div>
+    ${n.type === 'approval' ? `<div class="section-title">审核规则</div>
+      <div class="kv">
+        <div><span>退回目标</span><b>${n.return_to
+          ? esc(n.return_to + (returnTarget ? ' · ' + returnTarget : ''))
+          : '未配置（退回后保持等待）'}</b></div>
+        <div><span>已退回</span><b>${n.return_count || 0} 次</b></div>
+      </div>` : ''}
     <div class="section-title">执行说明</div>
     ${n.message
       ? `<div class="task-prose">${esc(n.message)}</div>`
       : `<div class="pending-box">${esc(pendingWhy(n))}</div>`}
     ${taskBlock(n)}
     ${ap}
+    ${apHistory}
     ${n.expression ? `<div class="section-title">判定表达式</div>
       <div class="mono" style="background:#f8fafc;border:1px solid var(--line);border-radius:8px;padding:7px 10px">${esc(n.expression)}${
         n.branch_taken ? `　→ 命中 <b style="color:${n.branch_taken === 'true' ? '#16a34a' : '#b45309'}">${n.branch_taken.toUpperCase()}</b>` : ''}</div>` : ''}
@@ -1084,6 +1111,9 @@ function renderNodeEditor(pane, n) {
       <div class="insp-row"><label>重试上限</label>
         <input type="number" min="0" max="9" value="${d.max_retries == null ? 0 : d.max_retries}"
                oninput="editNode('${d.id}','max_retries',Math.max(0,Math.min(9,+this.value||0)))"></div>
+      ${d.type === 'approval' ? `<div class="insp-row"><label>退回目标</label>
+        <input value="${esc(d.return_to || '')}" placeholder="留空 = 退回后保持等待"
+               oninput="editNode('${d.id}','return_to',this.value)"></div>` : ''}
       ${d.type === 'condition' ? `<div class="insp-row"><label>判定表达式</label>
         <input value="${esc(d.expression || '')}" placeholder="qa_score >= 80"
                oninput="editNode('${d.id}','expression',this.value)"></div>` : ''}
@@ -1173,6 +1203,8 @@ function outputBlock(o) {
   if (o.decision) push('人工决定', `<b>${esc(String(o.decision))}</b>`);
   if (o.approver) push('处理人', esc(String(o.approver)));
   if (o.comment) push('意见', esc(String(o.comment)));
+  if (o.return_to) push('退回目标', esc(String(o.return_to)) +
+    (o.return_to_name ? ' · ' + esc(String(o.return_to_name)) : ''));
   if (o.loc != null) push('代码行数', esc(String(o.loc)) + ' 行');
   if (o.passed != null || o.total != null) {
     const p = o.passed == null ? '—' : o.passed, t = o.total == null ? '—' : o.total;
@@ -1221,6 +1253,9 @@ function renderInspector(pane, n) {
       <div class="insp-row"><label>重试上限</label>
         <input type="number" min="0" max="9" value="${d.max_retries == null ? 0 : d.max_retries}"
                oninput="editNode('${d.id}','max_retries',Math.max(0,Math.min(9,+this.value||0)))"></div>
+      ${d.type === 'approval' ? `<div class="insp-row"><label>退回目标</label>
+        <input value="${esc(d.return_to || '')}" placeholder="上游节点 ID；留空则保持等待"
+               oninput="editNode('${d.id}','return_to',this.value)"></div>` : ''}
       <div class="insp-row"><label>前置依赖</label><div class="insp-hint">${esc(deps)}　（由连线自动维护）</div></div>
       ${d.task_id ? `<div class="insp-row"><label>任务归属</label>
         <div class="insp-hint">${esc(d.task_id)} · ${esc(d.module || '—')} · ${esc(d.spec_ref || '')}<br>
@@ -1909,7 +1944,12 @@ function addNode(kind, role) {
 function editNode(id, field, val) {
   const n = app.def && app.def.nodes.find(x => x.id === id);
   if (!n) return;
-  n[field] = val;
+  if (field === 'return_to') {
+    const target = String(val || '').trim();
+    if (target) n.return_to = target; else delete n.return_to;
+  } else {
+    n[field] = val;
+  }
   if (n.task_id && app.def.tasks) {
     const t = app.def.tasks.find(x => x.id === n.task_id);
     if (t) {
@@ -2084,8 +2124,10 @@ async function doApprove(id, decision) {
   const comment = String((box ? box.value : app.apComment) || '').trim();
   app.apComment = '';           // 提交后清空，避免带到下一个审批节点
   const r = await api(`/api/nodes/${id}/approval`, { decision, comment });
-  if (r && r.ok === false) toast(r.message || '审批未执行', true);
-  else { toast(decision === 'approve' ? '已批准，流程继续' : '已打回，等待修改'); refresh(); }
+  if (r && r.ok === false) toast(r.message || '审核未执行', true);
+  else { toast(r && r.message && r.message !== 'ok'
+    ? r.message
+    : (decision === 'approve' ? '审核通过，流程继续' : '已退回修改')); refresh(); }
 }
 function doRetry(id) { api(`/api/nodes/${id}/retry`); }
 function doSkip(id) { api(`/api/nodes/${id}/skip`); }

@@ -283,24 +283,8 @@ async function main() {
       + " && document.querySelectorAll('[onclick*=\"openModel\"]').length === 1"),
       '顶栏没有重复的模型入口（只有 1 个入口，旧的徽标已合并）');
 
-    check(await evaluate("(() => { const boxes = Array.from(document.querySelectorAll('#phaseLayer .phase-box'));"
-      + " if (!boxes.length) return false;"
-      + " return boxes.every((a, i) => boxes.slice(i + 1).every(b => {"
-      + " const x = a.getBBox(), y = b.getBBox();"
-      + " return x.x + x.width <= y.x || y.x + y.width <= x.x"
-      + " || x.y + x.height <= y.y || y.y + y.height <= x.y; })); })()"),
-      '画布按阶段绘制独立分区，分区框不互相重叠');
     check(await evaluate("document.querySelectorAll('.node .part-strip').length >= 3"),
       '节点顶部有分组同色细条');
-    check(await evaluate("document.querySelectorAll('#phaseTaskList .phase-task-group').length > 0"
-      + " && document.querySelectorAll('#phaseTaskList .phase-task-row').length > 0"),
-      '左侧任务清单按阶段展示任务');
-    check(await evaluate("(() => { const row = document.querySelector('#phaseTaskList .phase-task-row');"
-      + " if (!row) return false; row.click();"
-      + " const node = app.nodes.find(n => n.task_id === row.dataset.taskId)"
-      + " || app.def.nodes.find(n => n.task_id === row.dataset.taskId);"
-      + " return !!node && app.selected === node.id; })()"),
-      '点击左侧任务会选中对应画布节点');
 
     console.log('\n[2] 模型配置面板');
     await evaluate("document.querySelector('#btnModel').click()");
@@ -317,7 +301,7 @@ async function main() {
     })()`);
     await evaluate("document.querySelector('#btnSaveSettings').click()");
     await waitFor("app.settings && app.settings.active === true", 15000, '配置保存并激活');
-    check((await text('#btnModel')).indexOf('真实模型') >= 0,
+    check((await text('#btnModel')).indexOf('已配置') >= 0,
       '入口切换为真实模型（' + (await text('#btnModel')) + '）');
     const keyHint = await text('#setKeyHint');
     check(keyHint.indexOf('sk-ui-test-abcdef123456') < 0 && keyHint.indexOf('…') >= 0,
@@ -402,6 +386,22 @@ async function main() {
       '任务子步骤可展开');
     check(await evaluate("document.querySelectorAll('#specTasks .tc-file').length >= 3"),
       '任务列出目标文件');
+    check(await evaluate("(() => { const boxes = Array.from(document.querySelectorAll('#phaseLayer .phase-box'));"
+      + " if (!boxes.length) return false;"
+      + " return boxes.every((a, i) => boxes.slice(i + 1).every(b => {"
+      + " const x = a.getBBox(), y = b.getBBox();"
+      + " return x.x + x.width <= y.x || y.x + y.width <= x.x"
+      + " || x.y + x.height <= y.y || y.y + y.height <= x.y; })); })()"),
+      '画布按阶段绘制独立分区，分区框不互相重叠');
+    check(await evaluate("document.querySelectorAll('#phaseTaskList .phase-task-group').length > 0"
+      + " && document.querySelectorAll('#phaseTaskList .phase-task-row').length > 0"),
+      '左侧任务清单按阶段展示任务');
+    check(await evaluate("(() => { const row = document.querySelector('#phaseTaskList .phase-task-row');"
+      + " if (!row) return false; row.click();"
+      + " const node = app.nodes.find(n => n.task_id === row.dataset.taskId)"
+      + " || app.def.nodes.find(n => n.task_id === row.dataset.taskId);"
+      + " return !!node && app.selected === node.id; })()"),
+      '点击左侧任务会选中对应画布节点');
     await shot('04-task-hierarchy');
 
     console.log('\n[5] 运行产物页签');

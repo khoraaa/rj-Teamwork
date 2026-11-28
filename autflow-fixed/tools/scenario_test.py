@@ -83,8 +83,9 @@ def scenario_reject():
     n9 = by_id(s)["N9"]
     check(s["run"]["status"] == "WAITING_HUMAN", "打回后流程保持挂起，不误报完成")
     check(n9["gate"].get("human") == "fail", "人工门记录为 fail")
-    check("打回" in (n9.get("message") or "") or "打回" in "".join(n9.get("logs") or []),
-          "打回意见已留痕")
+    check(any(("退回" in str(x)) for x in
+              [n9.get("message") or ""] + list(n9.get("logs") or [])),
+          "退回意见已留痕")
 
     r = call("/api/nodes/N9/retry", {})
     check(r.get("ok"), "人工重试被接受")

@@ -108,7 +108,8 @@ def suite_definitions():
             "name": "python_compile",
             "title": "Python 语法编译",
             "command": [py, "-m", "py_compile", "server.py", "tools/acceptance_runner.py",
-                        "tools/e2e_acceptance.py", "tools/recovery_test.py",
+                        "tools/e2e_acceptance.py", "tools/approval_gate_test.py",
+                        "tools/recovery_test.py",
                         "tools/executor_test.py", "tools/agent_async_test.py"],
             "server": False,
         },
@@ -144,6 +145,12 @@ def suite_definitions():
             "with_artifacts": True,
         },
         {
+            "name": "approval_gate_test",
+            "title": "A · 两个关键审核关口与 return_to 受控重跑",
+            "command": [py, "tools/approval_gate_test.py"],
+            "server": False,
+        },
+        {
             "name": "smoke_test",
             "title": "主链路冒烟",
             "command": [py, "tools/smoke_test.py"],
@@ -169,7 +176,7 @@ def suite_definitions():
         },
         {
             "name": "generate_test",
-            "title": "需求生成、审批与历史归档",
+            "title": "需求生成、双审核与历史归档",
             "command": [py, "tools/generate_test.py"],
             "server": True,
         },
@@ -178,12 +185,14 @@ def suite_definitions():
             "title": "B · 执行器、错误分类与超时重试",
             "command": [py, "tools/executor_test.py"],
             "server": True,
+            "env": {"AUTFLOW_ENABLE_LOCAL_CODE_EXECUTION": "1"},
         },
         {
             "name": "agent_async_test",
             "title": "B · 慢执行器不阻塞接口与调度",
             "command": [py, "tools/agent_async_test.py"],
             "server": False,
+            "env": {"AUTFLOW_ENABLE_LOCAL_CODE_EXECUTION": "1"},
         },
         {
             "name": "llm_tool_test",
@@ -214,7 +223,7 @@ def suite_definitions():
         {
             "name": "sdd_flow_test",
             "title": "G · 真实 SDD 全流程：规格文档 → 任务清单 → 工作流 → 跑完有内容",
-            "command": ["python", "tools/sdd_flow_test.py"],
+            "command": [py, "tools/sdd_flow_test.py"],
             "server": False,
             "with_artifacts": False,
         },
@@ -236,6 +245,7 @@ def suite_definitions():
             "title": "H · 多 AI 接入 / 彻底清除密钥 / 任务分组",
             "command": [py, "tools/multi_ai_test.py"],
             "server": False,
+            "env": {"AUTFLOW_ENABLE_LOCAL_CODE_EXECUTION": "1"},
         },
         {
             "name": "llm_ui_e2e",
@@ -276,6 +286,7 @@ def run_suite(spec, out_dir, timeout, skip_browser):
     started = time.time()
     env = dict(os.environ)
     env["PYTHONPYCACHEPREFIX"] = os.path.join(tempfile.gettempdir(), "autflow-pycache")
+    env.update(spec.get("env") or {})
     # 服务端 stdout 重定向到文件时是块缓冲的，进程被 kill 后日志全丢；
     # 关掉缓冲才能留下崩溃前的最后一行，验收报告才有现场可查。
     env["PYTHONUNBUFFERED"] = "1"

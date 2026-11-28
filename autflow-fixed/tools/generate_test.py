@@ -105,21 +105,33 @@ check(any(n["id"] == "N90" for n in r3["draft"]["definition"]["nodes"]), "新增
 code, r4 = call("/api/workflows/%s/publish" % wid, {"note": "需求生成 v2"})
 check(code == 200 and r4.get("ok"), "发布新版本（%s）" % r4.get("version"))
 
-print("\n[5] 启动 → 人工审批 → 完成 → 归档")
+print("\n[5] 启动 → 两个关键审核 → 完成 → 归档")
 code, r5 = call("/api/workflows/%s/runs" % wid, {"speed": 12, "demo": False, "qa_mode": "pass"})
 check(code == 200 and r5.get("ok"), "按草稿启动运行")
 run_id = r5.get("run_id")
-st = wait_status(("WAITING_HUMAN",), 60)
-check(st == "WAITING_HUMAN", "运行停在人工审批（当前 %s）" % st)
-
-_, s = call("/api/state")
-waits = [n for n in s["nodes"] if n["status"] == "WAITING_HUMAN"]
-check(len(waits) == 1, "恰有一个节点等待人工审批")
-code, ra = call("/api/nodes/%s/approval" % waits[0]["id"], {"decision": "approve"})
-check(code == 200, "提交人工审批通过")
-
-st = wait_status(("SUCCESS", "FAILED"), 60)
-check(st == "SUCCESS", "审批后运行成功结束（当前 %s）" % st)
+seen_approvals = []
+deadline = time.time() + 90
+st = None
+while time.time() < deadline:
+    _, s = call("/api/state")
+    st = s["run"]["status"]
+    waits = [n for n in s["nodes"]
+             if n["status"] == "WAITING_HUMAN" and n["type"] == "approval"]
+    if waits:
+        for node in waits:
+            if node["id"] not in seen_approvals:
+                seen_approvals.append(node["id"])
+            code, ra = call("/api/nodes/%s/approval" % node["id"],
+                            {"decision": "approve",
+                             "comment": "自动验收：" + (node.get("name") or node["id"])})
+            check(code == 200 and ra.get("ok"),
+                  "审核通过：%s" % (node.get("name") or node["id"]))
+    if st in ("SUCCESS", "FAILED", "CANCELLED"):
+        break
+    time.sleep(0.25)
+check(len(seen_approvals) == 2,
+      "两次关键审核都到点暂停（实际 %d）" % len(seen_approvals))
+check(st == "SUCCESS", "两次审核后运行成功结束（当前 %s）" % st)
 
 print("\n[6] 历史查看")
 code, hl = call("/api/runs")

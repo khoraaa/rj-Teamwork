@@ -184,14 +184,19 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   fn.onPointerMove({ clientX: 520, clientY: 430 });
   const dAfter = rec ? rec.path.getAttribute('d') : null;
   check(dAfter && dBefore && dAfter !== dBefore, '新连线随节点移动实时重绘');
-  // 拖动的是目标节点，路径末尾（进入节点顶部前 4px）应等于节点当前坐标
+  // 拖动的是目标节点：横向边落在目标左边界，纵向边落在目标顶部。
   const nums = String(dAfter || '').match(/-?\d+(?:\.\d+)?/g) || [];
   const endX = Number(nums[nums.length - 2]);
-  const endY = Number(nums[nums.length - 1]) + 4;
-  const expX = app.pos[newId].x + 100, expY = app.pos[newId].y;
-  check(Math.abs(endX - expX) < 1.5 && Math.abs(endY - expY) < 1.5,
+  const endY = Number(nums[nums.length - 1]);
+  const target = app.pos[newId], source = app.pos.N6;
+  const horizontal = target.x > source.x + 12;
+  const expX = horizontal ? target.x - 4 : target.x + 100;
+  const validY = horizontal
+    ? endY > target.y && endY < target.y + 70
+    : Math.abs(endY - (target.y - 4)) < 1.5;
+  check(Math.abs(endX - expX) < 1.5 && validY,
         '重绘路径终点跟随节点（终点 ' + endX.toFixed(0) + ',' + endY.toFixed(0) +
-        '，期望 ' + expX.toFixed(0) + ',' + expY.toFixed(0) + '）');
+        '，目标节点 ' + target.x.toFixed(0) + ',' + target.y.toFixed(0) + '）');
   fn.onPointerUp({ clientX: 520, clientY: 430 });
   check(app.def.nodes.find((n) => n.id === newId).pos &&
         typeof app.def.nodes.find((n) => n.id === newId).pos.x === 'number', '松手后坐标写入定义');

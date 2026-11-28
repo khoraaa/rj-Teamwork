@@ -1,7 +1,7 @@
 {
   "id": "default",
   "name": "标准 SE 流程",
-  "description": "需求输入 → 分析与拆分 → 架构设计 → 按能力域并行实现 → 质量门分支 → 回归/修复 → 合并验证 →（高风险时）安全合规评审 → 上线审批 → 交付",
+  "description": "需求输入 → 分析与拆分 → 需求与任务确认 → 架构设计 → 按能力域并行实现 → 质量门分支 → 回归/修复 → 合并验证 →（高风险时）安全合规评审 → 交付审核 → 交付",
   "concurrency_limit": 3,
   "domains": [
     {"label": "认证与账号", "role": "coder",
@@ -23,6 +23,8 @@
   "pipeline": [
     {"kind": "start", "name": "需求输入", "role": "system", "max_retries": 0},
     {"kind": "agent", "name": "需求分析与拆分", "role": "pm", "out_schema": "prd-v1"},
+    {"kind": "approval", "name": "需求与任务确认", "role": "human", "max_retries": 0,
+     "return_to": "@previous"},
     {"kind": "agent", "name": "架构与接口设计", "role": "architect", "out_schema": "design-v1"},
     {"kind": "fanout", "source": "domains", "max": 3, "suffix": "实现",
      "role": "coder", "out_schema": "code-result-v1", "max_retries": 3,
@@ -34,7 +36,8 @@
      "out_schema": "code-result-v1"},
     {"kind": "join", "name": "合并验证", "role": "qa", "join": "any", "out_schema": "verify-v1"},
     {"kind": "risk_agent", "name": "安全与合规评审", "role": "qa", "out_schema": "scan-v1"},
-    {"kind": "approval", "name": "上线审批", "role": "human", "max_retries": 0},
+    {"kind": "approval", "name": "交付审核", "role": "human", "max_retries": 0,
+     "return_to": "@previous"},
     {"kind": "end", "name": "交付完成", "role": "system", "max_retries": 0}
   ]
 }

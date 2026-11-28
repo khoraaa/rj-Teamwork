@@ -315,16 +315,43 @@ async function main() {
           '顶栏显示运行状态和 Run ID');
     await waitFor("app.run.status === 'WAITING_HUMAN'", 60000, '运行停在审批');
     check(true, '画布状态与服务端同步为待人工审批');
+    check(await evaluate("document.querySelector('#bannerActions').textContent.indexOf('审核通过') >= 0 && "
+      + "document.querySelector('#bannerActions').textContent.indexOf('退回修改') >= 0"),
+          '审核横幅使用通用“审核通过 / 退回修改”文案');
     const approvalId = await evaluate(
       "app.nodes.find(n => n.type === 'approval' && n.status === 'WAITING_HUMAN').id");
     await evaluate(`selectNode(${JSON.stringify(approvalId)}); true`);
     await waitFor("document.querySelector('#apComment') !== null", 5000, '审批意见输入框');
-    const approvalComment = '浏览器验收：批准上线';
+    check(await evaluate("document.querySelector('#paneDetail').textContent.indexOf('审核规则') >= 0 && "
+      + "document.querySelector('#paneDetail').textContent.indexOf('退回目标') >= 0"),
+          '节点详情展示审核退回目标');
+    const approvalComment = '浏览器验收：任务范围和验收标准确认';
     await setValue('#apComment', approvalComment);
     await evaluate("document.querySelector('#paneDetail .actions .btn.primary').click(); true");
+    await waitFor(
+      "app.run.status === 'SUCCESS' || (app.run.status === 'WAITING_HUMAN' && " +
+      "app.nodes.some(n => n.type === 'approval' && n.status === 'WAITING_HUMAN' && " +
+      `n.id !== ${JSON.stringify(approvalId)}))`,
+      60000, '进入下一个审核或运行完成');
+    const secondApprovalId = await evaluate(
+      "app.run.status === 'WAITING_HUMAN' ? " +
+      "app.nodes.find(n => n.type === 'approval' && n.status === 'WAITING_HUMAN' && " +
+      `n.id !== ${JSON.stringify(approvalId)}).id : null`);
+    const deliveryComment = '浏览器验收：测试结果与交付内容确认';
+    if (secondApprovalId) {
+      check(await evaluate(`app.nodeById[${JSON.stringify(secondApprovalId)}].name === '交付审核'`),
+            '第二个审核节点是交付审核');
+      await evaluate(`selectNode(${JSON.stringify(secondApprovalId)}); true`);
+      await waitFor("document.querySelector('#apComment') !== null", 5000, '交付审核意见输入框');
+      await setValue('#apComment', deliveryComment);
+      await evaluate("document.querySelector('#paneDetail .actions .btn.primary').click(); true");
+    }
     await waitFor("app.run.status === 'SUCCESS'", 60000, '运行成功');
     check(await evaluate(`app.nodeById[${JSON.stringify(approvalId)}].output.comment === ${JSON.stringify(approvalComment)}`),
           '审批意见写入节点产物');
+    check(secondApprovalId && await evaluate(
+      `app.nodeById[${JSON.stringify(secondApprovalId)}].output.comment === ${JSON.stringify(deliveryComment)}`),
+      '交付审核意见写入节点产物');
     check(await evaluate("document.querySelector('#wfState').textContent.indexOf('已完成') === 0"),
           '终态工作流标签显示已完成');
     await screenshot('04-approval-success');

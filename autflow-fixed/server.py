@@ -119,6 +119,7 @@ BLOCKING = {"FAILED", "WAITING_HUMAN", "CANCELLED", "UNCERTAIN"}
 NODE_FIELDS = ("id", "type", "name", "role", "deps", "status", "retry_count", "attempts",
                "gate", "output", "logs", "duration", "message", "expression", "branch",
                "join", "max_retries", "out_schema", "started_at", "finished_at", "branch_taken",
+               "return_to", "return_count", "approval_history",
                # 任务清单字段（由规格分解而来）：进快照后前端右栏才能显示验收条款与规格出处
                "task_id", "module", "spec_ref", "priority", "estimate", "acceptance",
                "acceptance_sources", "kind", "spec_revision", "spec_hash",
@@ -143,6 +144,7 @@ PART_NAME_HINTS = (
     ("需求输入", "skeleton"), ("需求分析", "skeleton"), ("架构", "skeleton"),
     ("质量门", "test"), ("回归测试", "test"), ("修复", "feature"),
     ("合并验证", "integrate"), ("安全", "review"), ("合规评审", "review"),
+    ("任务确认", "skeleton"), ("交付审核", "delivery"),
     ("上线审批", "delivery"), ("交付", "delivery"),
 )
 PART_ROLE_HINTS = {"pm": "skeleton", "architect": "skeleton", "tester": "test",
@@ -272,6 +274,27 @@ def validate_workflow(wf):
             if not {"true", "false"} <= labels:
                 errors.append({"code": "E-BRANCH",
                                "msg": "条件节点 %s 的出边必须分别标注 true / false" % nid})
+        if n.get("type") == "approval" and n.get("return_to"):
+            target = str(n["return_to"]).strip()
+            if target not in nodes:
+                errors.append({"code": "E-APPROVAL-RETURN",
+                               "msg": "审批节点 %s 的 return_to 指向不存在的节点 %s"
+                                      % (nid, target)})
+            elif target == nid:
+                errors.append({"code": "E-APPROVAL-RETURN",
+                               "msg": "审批节点 %s 不能退回自身" % nid})
+            else:
+                ancestors, stack = set(), list(n.get("deps") or [])
+                while stack:
+                    cur = stack.pop()
+                    if cur in ancestors or cur not in nodes:
+                        continue
+                    ancestors.add(cur)
+                    stack.extend(nodes[cur].get("deps") or [])
+                if target not in ancestors:
+                    errors.append({"code": "E-APPROVAL-RETURN",
+                                   "msg": "审批节点 %s 只能退回到它的上游节点，%s 不在上游"
+                                          % (nid, target)})
 
     errors.extend(_validate_task_graph(wf, nodes))
     stats = {"nodes": len(nodes), "edges": len(edges),
@@ -471,6 +494,12 @@ def _walk_pipeline(tpl, text, trace, segment, risk=False):
         index[node["id"]] = node
         for src in deps:
             link(src, node["id"])
+        if kind == "approval":
+            target = step.get("return_to")
+            if target == "@previous":
+                target = deps[0] if deps else ""
+            if target:
+                node["return_to"] = target
         return node["id"]
 
     heads, branch_ids, branch_map, cond = [], [], {}, None
@@ -527,11 +556,11 @@ def generate_workflow(requirement, name=None, template="default"):
     has_risk_stage = any(s["kind"] == "risk_agent" for s in tpl["pipeline"])
     if risk:
         trace.append("风险识别：命中 " + "、".join(risk)
-                     + ("，追加安全评审与上线审批" if has_risk_stage
+                     + ("，追加安全评审与交付审核" if has_risk_stage
                         else "（本模板无安全评审阶段，仅记录风险）"))
     else:
         trace.append("风险识别：未命中高风险词"
-                     + ("，仍保留上线审批节点" if has_risk_stage else ""))
+                     + ("，仍保留交付审核节点" if has_risk_stage else ""))
     trace.append("套用模板「%s」：%d 个阶段，%d 个能力域，并发上限 %s"
                  % (tpl["name"], len(tpl["pipeline"]), len(tpl["domains"]),
                     tpl.get("concurrency_limit", 3)))
@@ -2442,6 +2471,8 @@ class Engine:
         run.setdefault("fail_mode", "off")
         run.setdefault("concurrency", 3)
         run.setdefault("stats", {"dispatched": 0, "retries": 0, "skipped": 0, "human_waits": 0})
+        run["stats"].setdefault("approval_returns", 0)
+        run.setdefault("approval_history", [])
         run.setdefault("demo_node", None)
         run.setdefault("agent", self.cfg.get("agent", "mock"))
         run.setdefault("mode", "llm" if SETTINGS.public()["active"] else "mock")
@@ -2523,7 +2554,8 @@ class Engine:
             nodes[n["id"]] = dict(
                 n, status="PENDING", retry_count=0, attempts=[], gate={}, output=None,
                 logs=[], duration=0.0, remaining=0.0, started_at=None, finished_at=None,
-                branch_taken=None, message="等待前置依赖")
+                branch_taken=None, message="等待前置依赖", return_count=0,
+                approval_history=[])
         for n in nodes.values():
             n.setdefault("max_retries", 2)
         self.run = {
@@ -2550,7 +2582,9 @@ class Engine:
             "qa_mode": self.cfg["qa_mode"],
             "fail_mode": "off",          # off | single | persistent | timeout | timeout_persistent
             "concurrency": int(wf.get("concurrency_limit", 3) or 3),
-            "stats": {"dispatched": 0, "retries": 0, "skipped": 0, "human_waits": 0},
+            "stats": {"dispatched": 0, "retries": 0, "skipped": 0, "human_waits": 0,
+                      "approval_returns": 0},
+            "approval_history": [],
             "agent": self.cfg.get("agent", "mock") if LOCAL_CODE_EXECUTION_ENABLED else "mock",
             "mode": ("llm" if SETTINGS.public()["active"] else "mock")
             if LOCAL_CODE_EXECUTION_ENABLED else "mock",
@@ -2733,23 +2767,121 @@ class Engine:
             n = self.run["nodes"].get(node_id)
             if not n or n["status"] != "WAITING_HUMAN":
                 return False, "该节点不在待审批状态"
+            if n.get("type") != "approval":
+                return False, "该节点不是审核节点"
+            if decision not in ("approve", "reject"):
+                return False, "未知审核操作：%s" % decision
+
+            target = str(n.get("return_to") or "").strip()
+            target_node = self.run["nodes"].get(target) if target else None
+            if decision == "reject" and target:
+                if not target_node:
+                    return False, "退回目标节点不存在：%s" % target
+                if target == node_id:
+                    return False, "审核节点不能退回自身"
+
+            history_entry = {
+                "node_id": node_id, "node_name": n.get("name"),
+                "decision": "APPROVED" if decision == "approve" else "REJECTED",
+                "comment": comment,
+                "approver": "值班工程师 · 张工",
+                "at": round(self.run["elapsed"], 2),
+            }
             if decision == "approve":
                 n["gate"]["human"] = "pass"
                 n["output"] = {"decision": "APPROVED", "approver": "值班工程师 · 张工",
-                               "comment": comment or "同意上线", "signed_at": round(self.run["elapsed"], 2)}
-                n["logs"].append("✓ 人工审批通过，签署人：张工")
-                self._set_status(n, "SUCCESS", "人工审批通过")
+                               "comment": comment or "审核通过",
+                               "signed_at": round(self.run["elapsed"], 2)}
+                self.run.setdefault("approval_history", []).append(history_entry)
+                n.setdefault("approval_history", []).append(dict(history_entry))
+                n["logs"].append("✓ 审核通过，签署人：张工")
+                self._set_status(n, "SUCCESS", "审核通过")
                 self.run["status"] = "RUNNING"
-                self._emit("approval.resolved", node_id, "审批通过，流程继续向交付节点推进")
-                self._ensure_loop()     # 重启后恢复的等待态没有在跑的调度线程
+                self._emit("approval.resolved", node_id,
+                           "%s：审核通过，流程继续" % (n.get("name") or node_id))
+                self._ensure_loop()
             else:
                 n["gate"]["human"] = "fail"
-                n["message"] = "审批被打回，等待修改后重试"
-                n["logs"].append("✗ 人工审批打回：" + (comment or "需修改后重新提审"))
-                self._emit("approval.resolved", node_id, "审批打回：" + (comment or "需修改后重新提审"))
+                if target:
+                    history_entry["return_to"] = target
+                    history_entry["return_to_name"] = target_node.get("name")
+                    n["return_count"] = int(n.get("return_count") or 0) + 1
+                    n["logs"].append("↩ 审核退回：%s；目标 %s %s（第 %d 轮）"
+                                     % (comment or "退回修改", target,
+                                        target_node.get("name") or "", n["return_count"]))
+                    reset_ids = self._descendants(target)
+                    self._reset_after_return(reset_ids, target, node_id, comment)
+                    self.run["status"] = "RUNNING"
+                    self.run.setdefault("stats", {}).setdefault("approval_returns", 0)
+                    self.run["stats"]["approval_returns"] += 1
+                    self.run.setdefault("approval_history", []).append(history_entry)
+                    n.setdefault("approval_history", []).append(dict(history_entry))
+                    self._emit("approval.returned", node_id,
+                               "%s：退回修改，回到 %s %s（第 %d 轮）"
+                               % (n.get("name") or node_id, target,
+                                  target_node.get("name") or "", n["return_count"]))
+                    self._ensure_loop()
+                else:
+                    n["message"] = "审核退回，当前节点保持等待"
+                    n["output"] = {"decision": "REJECTED", "approver": "值班工程师 · 张工",
+                                   "comment": comment or "退回修改",
+                                   "signed_at": round(self.run["elapsed"], 2)}
+                    n["logs"].append("✗ 审核退回：" + (comment or "退回修改"))
+                    self.run.setdefault("approval_history", []).append(history_entry)
+                    n.setdefault("approval_history", []).append(dict(history_entry))
+                    self._emit("approval.resolved", node_id,
+                               "%s：审核退回，等待人工处理"
+                               % (n.get("name") or node_id))
             self.persist()
             self.cond.notify_all()
             return True, "ok"
+
+    def _descendants(self, start):
+        """返回 start 及其全部下游节点 ID；用于审核退回后的受控重跑。"""
+        seen = {start}
+        stack = [start]
+        while stack:
+            cur = stack.pop()
+            for edge in self.run["edges"]:
+                if edge.get("source") != cur:
+                    continue
+                nxt = edge.get("target")
+                if nxt in self.run["nodes"] and nxt not in seen:
+                    seen.add(nxt)
+                    stack.append(nxt)
+        return seen
+
+    def _reset_after_return(self, reset_ids, target, approval_id, comment):
+        """保留尝试历史，清掉本轮状态与产物，让目标节点可以重新执行。"""
+        def node_order(node_id):
+            suffix = node_id[1:]
+            return (0, int(suffix)) if suffix.isdigit() else (1, node_id)
+
+        for node_id in sorted(reset_ids, key=node_order):
+            node = self.run["nodes"].get(node_id)
+            if not node:
+                continue
+            node["executing"] = False
+            node.pop("exec_token", None)
+            node.pop("exec_started", None)
+            node["retry_count"] = 0
+            node["gate"] = {}
+            node["output"] = None
+            node["duration"] = 0.0
+            node["remaining"] = 0.0
+            node["started_at"] = None
+            node["finished_at"] = None
+            node["branch_taken"] = None
+            message = ("审核退回后重新执行" if node_id == target
+                       else ("等待重新审核" if node_id == approval_id
+                             else "等待上游审核退回后的重跑"))
+            self._set_status(node, "PENDING", message)
+            if node_id in (target, approval_id):
+                node.setdefault("logs", []).append(
+                    "↩ " + message + "：" + (comment or "退回修改"))
+        for edge in self.run["edges"]:
+            if edge.get("source") in reset_ids and edge.get("target") in reset_ids:
+                edge["active"] = True
 
     def retry_node(self, node_id):
         with self.lock:
@@ -2911,11 +3043,14 @@ class Engine:
         self.run["stats"]["dispatched"] += 1
         if n["type"] == "approval":
             n["started_at"] = round(self.run["elapsed"], 2)
-            self._set_status(n, "WAITING_HUMAN", "等待人工审批")
+            target = n.get("return_to")
+            target_text = ("；退回后回到 " + target) if target else "；未配置自动退回目标"
+            self._set_status(n, "WAITING_HUMAN", "等待人工审核" + target_text)
             self.run["stats"]["human_waits"] += 1
             self.run["status"] = "WAITING_HUMAN"
-            n["logs"].append("⏸ 流程挂起：高风险节点，等待人工签署")
-            self._emit("approval.requested", n["id"], "上线审批：等待值班工程师处理")
+            n["logs"].append("⏸ 流程挂起：等待人工审核" + target_text)
+            self._emit("approval.requested", n["id"],
+                       "%s：等待人工审核%s" % (n.get("name") or n["id"], target_text))
             return
         base = ROLE_META.get(n.get("role", "system"), ROLE_META["system"])["base_sec"]
         if n["type"] == "condition":
@@ -3350,7 +3485,7 @@ class Engine:
                          "requirement", "elapsed", "started_at", "finished_at", "speed",
                          "demo", "qa_mode", "fail_mode", "concurrency", "stats", "seq",
                          "agent", "recovered", "tasks", "spec_id", "spec_revision", "spec_hash",
-                         "mode", "workspace", "artifacts")},
+                         "mode", "workspace", "artifacts", "approval_history")},
                 "nodes": self._slim_nodes(),
                 "edges": [dict(e) for e in self.run["edges"]],
                 "events": self.run["events"][-200:],
@@ -4130,7 +4265,8 @@ class Handler(BaseHTTPRequestHandler):
         if len(parts) == 4 and parts[0] == "api" and parts[1] == "nodes":
             node_id, action = parts[2], parts[3]
             if action == "approval":
-                ok, msg = ENGINE.approve(node_id, body.get("decision", "approve"),
+                decision = body.get("decision") or body.get("action") or "approve"
+                ok, msg = ENGINE.approve(node_id, decision,
                                          body.get("comment", ""))
             elif action == "retry":
                 ok, msg = ENGINE.retry_node(node_id)

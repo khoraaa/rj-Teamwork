@@ -142,7 +142,8 @@ class Workspace:
             raise ValueError("命令为空")
         prog = os.path.basename(argv[0]).strip('"\'').lower()
         prog = re.sub(r"\.(exe|cmd|bat)$", "", prog)
-        if prog not in ALLOWED_PROGRAMS:
+        python_versioned = re.fullmatch(r"python\d+(?:\.\d+)?", prog) is not None
+        if prog not in ALLOWED_PROGRAMS and not python_versioned:
             raise ValueError("命令 %r 不在白名单内（可用：%s）"
                              % (prog, "、".join(sorted(ALLOWED_PROGRAMS))[:200]))
         # 环境变量：放行常规变量（缺 SystemDrive/ProgramData 这类变量会让被测程序

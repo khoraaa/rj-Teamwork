@@ -191,43 +191,95 @@ def main():
     check(len(waits) == 1, "恰有一个审批节点等待处理")
     approval_id = waits[0]["id"] if waits else approval["id"]
 
-    print("\n[5] 审批打回、人工重试与再次通过")
+    print("\n[5] 任务确认退回指定节点、重跑、再通过，并处理交付审核")
+    approval_id = waits[0]["id"] if waits else approval["id"]
+    before_reject = by_id(waiting)
+    first_approval = before_reject[approval_id]
+    return_target = first_approval.get("return_to")
+    check(first_approval.get("name") == "需求与任务确认",
+          "第一个审核节点是需求与任务确认")
+    check(return_target in before_reject,
+          "任务确认配置了有效退回目标：%s" % return_target)
+    upstream = {approval_id}
+    stack = list(first_approval.get("deps") or [])
+    while stack:
+        current = stack.pop()
+        if current in upstream:
+            continue
+        upstream.add(current)
+        current_node = before_reject.get(current) or {}
+        stack.extend(current_node.get("deps") or [])
+    downstream_running = [
+        node["id"] for node in waiting["nodes"]
+        if node["id"] not in upstream
+        and node["status"] in ("READY", "RUNNING", "SUCCESS")
+    ]
+    check(not downstream_running,
+          "审核期间下游没有执行（异常：%s）" % (downstream_running[:4] or "无"))
+    target_attempts = len(before_reject[return_target].get("attempts") or [])
+    start_id = next(node["id"] for node in waiting["nodes"] if node["type"] == "start")
+    start_attempts = len(before_reject[start_id].get("attempts") or [])
     code, rejected_approval = call(
         "/api/nodes/%s/approval" % approval_id,
         {"decision": "reject", "comment": "C 验收：补充回滚方案"})
-    check(code == 200 and rejected_approval.get("ok"), "审批打回请求成功")
-    after_reject = call("/api/state")[1]
-    rejected_node = by_id(after_reject).get(approval_id, {})
-    check(after_reject["run"]["status"] == "WAITING_HUMAN",
-          "打回后运行仍挂起")
-    check(rejected_node.get("gate", {}).get("human") == "fail",
-          "人工门记录失败")
-
-    code, retried = call("/api/nodes/%s/retry" % approval_id, {})
-    check(code == 200 and retried.get("ok"), "人工重试审批节点成功")
+    check(code == 200 and rejected_approval.get("ok"), "审核退回请求成功")
     waiting_again = wait_state(
-        lambda state: any(node["id"] == approval_id
-                          and node["status"] == "WAITING_HUMAN"
-                          for node in state.get("nodes", [])), timeout=30)
-    check(waiting_again is not None
-          and by_id(waiting_again).get(approval_id, {}).get("status")
-          == "WAITING_HUMAN", "重试后再次进入待审批")
+        lambda state: (
+            by_id(state).get(return_target, {}).get("attempts")
+            and len(by_id(state)[return_target]["attempts"]) > target_attempts
+            and any(node["id"] == approval_id
+                    and node["status"] == "WAITING_HUMAN"
+                    for node in state.get("nodes", []))
+        ), timeout=45)
+    again = by_id(waiting_again or {})
+    check(len(again.get(return_target, {}).get("attempts") or []) > target_attempts,
+          "退回目标节点已重新执行（%d → %d）"
+          % (target_attempts,
+             len(again.get(return_target, {}).get("attempts") or [])))
+    check(len(again.get(start_id, {}).get("attempts") or []) == start_attempts,
+          "返回点之前的成功节点没有重复执行")
+    check(again.get(approval_id, {}).get("status") == "WAITING_HUMAN",
+          "退回重跑后再次等待任务确认")
+    check(any(event.get("type") == "approval.returned"
+              for event in (waiting_again or {}).get("events", [])),
+          "时间线记录审核退回事件")
 
-    approval_comment = "C 验收：回滚方案已补充，同意上线"
+    approval_comment = "C 验收：范围与验收标准确认"
     code, approved = call(
         "/api/nodes/%s/approval" % approval_id,
         {"decision": "approve", "comment": approval_comment})
-    check(code == 200 and approved.get("ok"), "二次审批通过")
+    check(code == 200 and approved.get("ok"), "任务确认审核通过")
+    delivery_wait = wait_state(
+        lambda state: any(node["type"] == "approval"
+                          and node["id"] != approval_id
+                          and node["status"] == "WAITING_HUMAN"
+                          for node in state.get("nodes", [])),
+        timeout=90)
+    delivery = next((node for node in (delivery_wait or {}).get("nodes", [])
+                     if node["type"] == "approval"
+                     and node["id"] != approval_id
+                     and node["status"] == "WAITING_HUMAN"), None)
+    check(delivery is not None and delivery.get("name") == "交付审核",
+          "测试与评审后进入交付审核")
+    delivery_comment = "C 验收：测试结果与交付内容确认"
+    code, approved_delivery = call(
+        "/api/nodes/%s/approval" % delivery["id"],
+        {"decision": "approve", "comment": delivery_comment})
+    check(code == 200 and approved_delivery.get("ok"), "交付审核通过")
     final = wait_state(
         lambda state: state["run"]["status"] in ("SUCCESS", "FAILED", "CANCELLED"))
     check(final and final["run"]["status"] == "SUCCESS",
-          "审批后运行成功结束（实际 %s）" % (
+          "两次审核后运行成功结束（实际 %s）" % (
               final and final["run"]["status"]))
     final_map = by_id(final or {})
     check(final_map.get(inserted_id, {}).get("status") == "SUCCESS",
           "新增复核节点成功执行")
     check(final_map.get(approval_id, {}).get("output", {}).get("comment")
           == approval_comment, "审批意见写入节点产物")
+    check(final_map.get(delivery["id"], {}).get("output", {}).get("comment")
+          == delivery_comment, "交付审核意见写入节点产物")
+    check(len((final or {}).get("run", {}).get("approval_history") or []) == 3,
+          "运行记录保留三次审核操作")
     check(final and final["run"].get("recovered") is False,
           "正常运行未误标为崩溃恢复")
     EVIDENCE["run_id"] = run_id

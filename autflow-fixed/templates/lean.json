@@ -1,7 +1,7 @@
 {
   "id": "lean",
   "name": "敏捷精简流程",
-  "description": "需求梳理 → 按能力域并行实现（最多 2 路）→ 集成自测 → 上线确认 → 完成；无质量门分支、无安全评审，适合小步快跑的验证型需求",
+  "description": "需求梳理 → 需求与任务确认 → 按能力域并行实现（最多 2 路）→ 集成自测 → 交付审核 → 完成；无质量门分支、无安全评审，适合小步快跑的验证型需求",
   "concurrency_limit": 2,
   "domains": [
     {"label": "认证与账号", "role": "coder",
@@ -21,11 +21,14 @@
   "pipeline": [
     {"kind": "start", "name": "需求输入", "role": "system", "max_retries": 0},
     {"kind": "agent", "name": "需求梳理与任务拆解", "role": "pm", "out_schema": "prd-v1"},
+    {"kind": "approval", "name": "需求与任务确认", "role": "human", "max_retries": 0,
+     "return_to": "@previous"},
     {"kind": "fanout", "source": "domains", "max": 2, "suffix": "",
      "role": "coder", "out_schema": "code-result-v1", "max_retries": 2,
      "fallback": {"name": "核心功能实现", "role": "coder"}},
     {"kind": "join", "name": "集成自测", "role": "qa", "join": "any", "out_schema": "verify-v1"},
-    {"kind": "approval", "name": "上线确认", "role": "human", "max_retries": 0},
+    {"kind": "approval", "name": "交付审核", "role": "human", "max_retries": 0,
+     "return_to": "@previous"},
     {"kind": "end", "name": "完成", "role": "system", "max_retries": 0}
   ]
 }

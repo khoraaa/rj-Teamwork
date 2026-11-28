@@ -81,7 +81,10 @@ def call(path, body=None, method=None, timeout=60):
 def wait_until(pred, timeout=90, tick=0.3):
     end = time.time() + timeout
     while time.time() < end:
-        val = pred()
+        try:
+            val = pred()
+        except Exception:
+            val = None
         if val:
             return val
         time.sleep(tick)
