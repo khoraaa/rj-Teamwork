@@ -637,6 +637,105 @@ function jsonHTML(obj) {
           .replace(/: (\d+(?:\.\d+)?|true|false|null)/g, ': <span class="n">$1</span>');
 }
 
+/* ---------------- 节点产物可视化：架构/接口设计 → 节点图，评审 → 评分卡 ---------------- */
+function _entityLabel(e, i) {
+  if (e && typeof e === 'object') return { id: e.id || ('ENT' + i), label: e.name || e.id || ('实体' + i), kind: e.kind || 'model' };
+  return { id: 'ENT' + i, label: String(e == null ? '实体' + i : e), kind: 'model' };
+}
+function _endpointLabel(e, i) {
+  if (e && typeof e === 'object') return { id: e.id || ('EP' + i), method: e.method || '', path: e.path || '', entity: e.entity || e.target || null };
+  const s = String(e || '').trim();
+  const m = s.match(/^(\w+)\s+(.+)$/);
+  return { id: 'EP' + i, method: m ? m[1] : '', path: m ? m[2] : s, entity: null };
+}
+
+function designGraphHTML(o) {
+  const ents = (o.entities || []).map(_entityLabel);
+  const eps = (o.endpoints || []).map(_endpointLabel);
+  const entIdx = {}; ents.forEach((e, i) => { entIdx[e.id] = i; });
+  const epIdx = {}; eps.forEach((e, i) => { epIdx[e.id] = i; });
+  const links = []; const seen = {};
+  (o.relations || []).forEach(r => {
+    if (!r || !r.from || !r.to) return;
+    const key = r.from + '>' + r.to;
+    if (seen[key]) return; seen[key] = 1;
+    if (entIdx[r.from] != null && epIdx[r.to] != null) links.push([entIdx[r.from], epIdx[r.to]]);
+    else if (epIdx[r.from] != null && entIdx[r.to] != null) links.push([entIdx[r.to], epIdx[r.from]]);
+  });
+  eps.forEach((e, i) => {
+    if (e.entity != null && entIdx[e.entity] != null) {
+      const key = 'ent:' + e.entity + '>ep:' + e.id;
+      if (!seen[key]) { seen[key] = 1; links.push([entIdx[e.entity], i]); }
+    }
+  });
+
+  const nodeH = 28, gapY = 8, padX = 8, padY = 22, colW = 126, gutter = 26;
+  const rows = Math.max(ents.length, eps.length, 1);
+  const W = padX * 2 + colW * 2 + gutter;
+  const H = padY + rows * nodeH + (rows - 1) * gapY + 8;
+  const lx = padX, rx = padX + colW + gutter;
+  const yOf = i => padY + i * (nodeH + gapY);
+
+  let g = '<svg class="dgraph" viewBox="0 0 ' + W + ' ' + H + '" width="100%" role="img" aria-label="架构与接口节点图">';
+  g += '<text x="' + lx + '" y="13" class="dg-col">数据模型 / 服务</text>';
+  g += '<text x="' + rx + '" y="13" class="dg-col">接口</text>';
+  links.forEach(l => {
+    const y1 = yOf(l[0]) + nodeH / 2, y2 = yOf(l[1]) + nodeH / 2;
+    g += '<line x1="' + (lx + colW) + '" y1="' + y1 + '" x2="' + rx + '" y2="' + y2 + '" class="dg-line"/>';
+  });
+  ents.forEach((e, i) => {
+    const y = yOf(i);
+    g += '<rect x="' + lx + '" y="' + y + '" width="' + colW + '" height="' + nodeH + '" rx="7" class="dg-ent"/>'
+      + '<text x="' + (lx + colW / 2) + '" y="' + (y + nodeH / 2 + 4) + '" text-anchor="middle" class="dg-t">' + esc(e.label) + '</text>';
+  });
+  eps.forEach((e, i) => {
+    const y = yOf(i);
+    const m = e.method ? '<tspan class="dg-m">' + esc(e.method) + '</tspan> ' : '';
+    g += '<rect x="' + rx + '" y="' + y + '" width="' + colW + '" height="' + nodeH + '" rx="7" class="dg-ep"/>'
+      + '<text x="' + (rx + 10) + '" y="' + (y + nodeH / 2 + 4) + '" class="dg-t">' + m + esc(e.path) + '</text>';
+  });
+  g += '</svg>';
+
+  let meta = '';
+  if (o.tables != null || o.planned_cases != null) {
+    meta = '<div class="oviz-meta">数据表 ' + (o.tables != null ? o.tables : '—')
+      + ' · 计划用例 ' + (o.planned_cases != null ? o.planned_cases : '—') + '</div>';
+  }
+  return '<div class="oviz"><div class="oviz-title">' + esc(o.artifact || 'design-v1')
+    + ' · 架构 / 接口节点图</div>' + g + meta + '</div>';
+}
+
+function reviewGaugeHTML(n, o) {
+  const score = (o && o.qa_score != null) ? o.qa_score : null;
+  const blocking = (o && Array.isArray(o.blocking)) ? o.blocking : [];
+  const passed = (o && o.result) !== false;
+  let ring = '';
+  if (score != null) {
+    const pct = Math.max(0, Math.min(100, Number(score) || 0));
+    const color = pct >= 80 ? 'var(--green)' : 'var(--red)';
+    const r = 26, c = 2 * Math.PI * r, dash = c * pct / 100;
+    ring = '<svg class="gauge" width="72" height="72" viewBox="0 0 72 72" aria-hidden="true">'
+      + '<circle cx="36" cy="36" r="' + r + '" class="gauge-bg"/>'
+      + '<circle cx="36" cy="36" r="' + r + '" class="gauge-fg" transform="rotate(-90 36 36)" style="stroke:' + color + ';stroke-dasharray:' + dash + ' ' + c + '"/>'
+      + '<text x="36" y="42" text-anchor="middle" class="gauge-num">' + Math.round(pct) + '</text></svg>';
+  }
+  const blocks = blocking.map(b => '<li>' + esc(b) + '</li>').join('');
+  const expr = n.expression ? '<div class="oviz-sub">表达式：' + esc(n.expression) + '</div>' : '';
+  const blk = blocking.length ? '<div class="oviz-sub">阻断项：</div><ul class="oviz-blocks">' + blocks + '</ul>' : '';
+  return '<div class="oviz"><div class="oviz-title">' + esc(n.type === 'condition' ? '质量门判定' : '评审门')
+    + ' · 输出可视化</div><div class="oviz-review ' + (passed ? 'ok' : 'no') + '">' + ring
+    + '<div class="oviz-review-body"><b>' + (passed ? '通过' : '未通过') + '</b>' + expr + blk + '</div></div></div>';
+}
+
+function outputVisual(n) {
+  const o = n && n.output;
+  if (!o || typeof o !== 'object') return '';
+  const art = o.artifact || n.out_schema;
+  if (art === 'design-v1' && Array.isArray(o.entities) && Array.isArray(o.endpoints)) return designGraphHTML(o);
+  if (n.type === 'condition' || o.qa_score != null) return reviewGaugeHTML(n, o);
+  return '';
+}
+
 function renderDetail(force) {
   const pane = $('#paneDetail');
   if (app.selEdge) return renderEdgeDetail(pane);
@@ -733,6 +832,7 @@ function renderDetail(force) {
       <div class="mono" style="background:#f8fafc;border:1px solid var(--line);border-radius:8px;padding:7px 10px">${esc(n.expression)}${
         n.branch_taken ? `　→ 命中 <b style="color:${n.branch_taken === 'true' ? '#16a34a' : '#b45309'}">${n.branch_taken.toUpperCase()}</b>` : ''}</div>` : ''}
     <div class="section-title">输出摘要</div>
+    ${outputVisual(n)}
     ${n.output ? `<pre class="output">${jsonHTML(n.output)}</pre>` : '<div class="empty" style="padding:14px">尚未产生产物</div>'}
     ${attTable}
     <div class="section-title">执行日志</div>

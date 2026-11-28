@@ -1317,8 +1317,24 @@ def _mock_output(n, context=None):
                 "tasks": _clone(tasks),
                 "acceptance": ["每条任务有验收标准", "依赖关系完整、无环"]}
     if schema == "design-v1":
-        return {"artifact": "design-v1", "endpoints": ["POST /api/login", "POST /api/logout"],
-                "entities": ["user", "session"], "tables": 2, "planned_cases": 6}
+        entities = [
+            {"id": "user", "name": "用户账户", "kind": "model"},
+            {"id": "session", "name": "登录会话", "kind": "model"},
+            {"id": "auth", "name": "认证服务", "kind": "service"},
+        ]
+        endpoints = [
+            {"id": "E1", "method": "POST", "path": "/api/login", "name": "登录", "entity": "user"},
+            {"id": "E2", "method": "POST", "path": "/api/logout", "name": "登出", "entity": "session"},
+            {"id": "E3", "method": "GET", "path": "/api/me", "name": "当前用户", "entity": "user"},
+        ]
+        relations = [
+            {"from": "E1", "to": "user", "label": "验证并写入"},
+            {"from": "E1", "to": "auth", "label": "调用"},
+            {"from": "E2", "to": "session", "label": "失效"},
+            {"from": "E3", "to": "user", "label": "读取"},
+        ]
+        return {"artifact": "design-v1", "entities": entities, "endpoints": endpoints,
+                "relations": relations, "tables": 2, "planned_cases": 6}
     if schema == "code-result-v1":
         if "重构" in name or "修复" in name:
             return {"artifact": "code-result-v1", "refactor": True, "loc": 154,

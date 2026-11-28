@@ -510,3 +510,25 @@ table.att td{padding:3px 5px; color:#475569; border-bottom:1px solid #f1f5f9}
 .acc-source{display:block; color:#94a3b8; font-family:ui-monospace,Consolas,monospace;
   font-size:10px; line-height:1.35}
 .muted{color:#94a3b8; font-weight:400}
+
+/* ---------------- 节点产物可视化 ---------------- */
+.oviz{border:1px solid var(--line);border-radius:10px;padding:10px;background:#fbfcfe;margin:2px 0 10px}
+.oviz-title{font-size:11px;font-weight:700;color:var(--muted);letter-spacing:.3px;margin-bottom:8px}
+.oviz-meta{font-size:11px;color:var(--muted);margin-top:6px}
+.dgraph{display:block;background:#fff;border:1px solid var(--line);border-radius:8px}
+.dg-col{font-size:10px;fill:var(--muted);font-weight:600}
+.dg-ent{fill:#dbeafe;stroke:#60a5fa}
+.dg-ep{fill:#fef3c7;stroke:#f59e0b}
+.dg-t{font-size:11px;fill:#1e293b}
+.dg-m{font-size:9px;fill:#b45309;font-weight:700}
+.dg-line{stroke:#94a3b8;stroke-width:1.2}
+.oviz-review{display:flex;align-items:center;gap:10px}
+.oviz-review.ok b{color:var(--green)}
+.oviz-review.no b{color:var(--red)}
+.oviz-review-body b{font-size:14px}
+.oviz-sub{font-size:11px;color:var(--muted);margin-top:2px}
+.oviz-blocks{margin:4px 0 0;padding-left:16px;color:var(--red);font-size:11px}
+.gauge{flex:0 0 auto}
+.gauge-bg{fill:none;stroke:#e2e8f0;stroke-width:7}
+.gauge-fg{fill:none;stroke-width:7;stroke-linecap:round}
+.gauge-num{font-size:18px;font-weight:700;fill:#0f172a;text-anchor:middle}
